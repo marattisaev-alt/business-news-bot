@@ -12,6 +12,10 @@ jobs:
     steps:
       - name: Download repository
         uses: actions/checkout@v4
+        - name: Show files
+  run: |
+    pwd
+    ls -la
 
       - name: Set up Python
         uses: actions/setup-python@v5
