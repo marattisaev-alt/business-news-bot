@@ -49,7 +49,10 @@ def save_posted(posted):
 def get_news():
     response = requests.get(
         RSS_URL,
-        timeout=20
+        timeout=20,
+        headers={
+            "User-Agent": "Mozilla/5.0"
+        }
     )
 
     response.raise_for_status()
@@ -62,11 +65,27 @@ def get_news():
         title = item.findtext("title")
         link = item.findtext("link")
 
-        if title and link:
-            news.append({
-                "title": title.strip(),
-                "link": link.strip()
-            })
+        if not title or not link:
+            continue
+
+        image = None
+
+        # Попытка найти изображение в RSS
+        for element in item:
+            tag = element.tag.lower()
+
+            if "content" in tag or "thumbnail" in tag:
+                url = element.attrib.get("url")
+
+                if url:
+                    image = url
+                    break
+
+        news.append({
+            "title": title.strip(),
+            "link": link.strip(),
+            "image": image
+        })
 
     return news
 
@@ -86,7 +105,10 @@ def translate_text(text):
 
         data = response.json()
 
-        translated = data.get("responseData", {}).get(
+        translated = data.get(
+            "responseData",
+            {}
+        ).get(
             "translatedText",
             ""
         )
@@ -100,16 +122,44 @@ def translate_text(text):
     return text
 
 
-def send_message(title, link):
-    safe_title = html.escape(title)
+def make_hashtags(title):
+    title_lower = title.lower()
 
-    text = (
+    tags = ["#Бизнес"]
+
+    if any(word in title_lower for word in [
+        "банк", "банков", "ставк", "инфляц", "эконом"
+    ]):
+        tags.append("#Экономика")
+
+    if any(word in title_lower for word in [
+        "apple", "google", "microsoft", "ai",
+        "искусственн", "технолог", "software"
+    ]):
+        tags.append("#Технологии")
+
+    if any(word in title_lower for word in [
+        "stock", "акци", "рынок", "инвест", "бирж"
+    ]):
+        tags.append("#Инвестиции")
+
+    return " ".join(tags[:3])
+
+
+def build_caption(title):
+    safe_title = html.escape(title)
+    hashtags = make_hashtags(title)
+
+    return (
         "🏢 <b>БИЗНЕС НОВОСТИ</b>\n\n"
         f"📰 <b>{safe_title}</b>\n\n"
         "🌍 Мировой бизнес и экономика\n\n"
-        "📌 Следите за главными событиями рынка "
-        "в канале «МРК»."
+        f"{hashtags}"
     )
+
+
+def send_text(title, link):
+    caption = build_caption(title)
 
     keyboard = {
         "inline_keyboard": [
@@ -128,11 +178,42 @@ def send_message(title, link):
         url,
         data={
             "chat_id": CHANNEL,
-            "text": text,
+            "text": caption,
             "parse_mode": "HTML",
             "reply_markup": json.dumps(keyboard)
         },
         timeout=20
+    )
+
+    response.raise_for_status()
+
+
+def send_photo(title, link, image):
+    caption = build_caption(title)
+
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "🔗 Читать источник",
+                    "url": link
+                }
+            ]
+        ]
+    }
+
+    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+
+    response = requests.post(
+        url,
+        data={
+            "chat_id": CHANNEL,
+            "photo": image,
+            "caption": caption,
+            "parse_mode": "HTML",
+            "reply_markup": json.dumps(keyboard)
+        },
+        timeout=30
     )
 
     response.raise_for_status()
@@ -148,25 +229,56 @@ def main():
         if article["link"] not in posted:
             new_posts.append(article)
 
+    # Не больше 3 новостей за один запуск
     new_posts = new_posts[:3]
 
     for article in new_posts:
-        print(f"Перевод: {article['title']}")
 
-        translated_title = translate_text(article["title"])
+        print(f"Обрабатываем: {article['title']}")
 
-        send_message(
-            translated_title,
-            article["link"]
+        translated_title = translate_text(
+            article["title"]
         )
+
+        try:
+            if article["image"]:
+                send_photo(
+                    translated_title,
+                    article["link"],
+                    article["image"]
+                )
+
+                print("Опубликовано с изображением")
+
+            else:
+                send_text(
+                    translated_title,
+                    article["link"]
+                )
+
+                print("Опубликовано без изображения")
+
+        except Exception as error:
+            print(f"Ошибка изображения: {error}")
+
+            # Если фото не удалось отправить,
+            # всё равно публикуем новость текстом
+            send_text(
+                translated_title,
+                article["link"]
+            )
 
         posted.add(article["link"])
 
-        print(f"Опубликовано: {translated_title}")
+        print(
+            f"Опубликовано: {translated_title}"
+        )
 
     save_posted(posted)
 
-    print(f"Всего опубликовано: {len(new_posts)}")
+    print(
+        f"Всего опубликовано: {len(new_posts)}"
+    )
 
 
 if __name__ == "__main__":
