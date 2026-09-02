@@ -1,5 +1,6 @@
 import os
 import json
+import html
 import requests
 import xml.etree.ElementTree as ET
 
@@ -8,6 +9,8 @@ CHANNEL = os.getenv("CHANNEL")
 
 RSS_URL = "https://news.google.com/rss/search?q=business&hl=en-US&gl=US&ceid=US:en"
 POSTED_FILE = "posted.json"
+
+TRANSLATE_URL = "https://api.mymemory.translated.net/get"
 
 
 def load_posted():
@@ -29,7 +32,7 @@ def load_posted():
         return set(data)
 
     except Exception as error:
-        print(f"Не удалось прочитать posted.json: {error}")
+        print(f"Ошибка posted.json: {error}")
         return set()
 
 
@@ -68,7 +71,57 @@ def get_news():
     return news
 
 
-def send_message(text):
+def translate_text(text):
+    try:
+        response = requests.get(
+            TRANSLATE_URL,
+            params={
+                "q": text,
+                "langpair": "en|ru"
+            },
+            timeout=20
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        translated = data.get("responseData", {}).get(
+            "translatedText",
+            ""
+        )
+
+        if translated:
+            return translated.strip()
+
+    except Exception as error:
+        print(f"Ошибка перевода: {error}")
+
+    return text
+
+
+def send_message(title, link):
+    safe_title = html.escape(title)
+
+    text = (
+        "🏢 <b>БИЗНЕС НОВОСТИ</b>\n\n"
+        f"📰 <b>{safe_title}</b>\n\n"
+        "🌍 Мировой бизнес и экономика\n\n"
+        "📌 Следите за главными событиями рынка "
+        "в канале «МРК»."
+    )
+
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "🔗 Читать источник",
+                    "url": link
+                }
+            ]
+        ]
+    }
+
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
     response = requests.post(
@@ -76,7 +129,8 @@ def send_message(text):
         data={
             "chat_id": CHANNEL,
             "text": text,
-            "disable_web_page_preview": False
+            "parse_mode": "HTML",
+            "reply_markup": json.dumps(keyboard)
         },
         timeout=20
     )
@@ -97,17 +151,18 @@ def main():
     new_posts = new_posts[:3]
 
     for article in new_posts:
-        text = (
-            "📰 БИЗНЕС НОВОСТИ\n\n"
-            f"🔹 {article['title']}\n\n"
-            f"🔗 Источник:\n{article['link']}"
-        )
+        print(f"Перевод: {article['title']}")
 
-        send_message(text)
+        translated_title = translate_text(article["title"])
+
+        send_message(
+            translated_title,
+            article["link"]
+        )
 
         posted.add(article["link"])
 
-        print(f"Опубликовано: {article['title']}")
+        print(f"Опубликовано: {translated_title}")
 
     save_posted(posted)
 
