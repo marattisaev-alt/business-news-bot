@@ -3,6 +3,8 @@ import json
 import html
 import requests
 import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
+
 
 TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL = os.getenv("CHANNEL")
@@ -64,26 +66,29 @@ def get_news():
     for item in root.findall(".//item"):
         title = item.findtext("title")
         link = item.findtext("link")
+        description = item.findtext("description")
+        source = item.findtext("source")
 
         if not title or not link:
             continue
 
         image = None
 
-        # Попытка найти изображение в RSS
         for element in item:
             tag = element.tag.lower()
 
             if "content" in tag or "thumbnail" in tag:
-                url = element.attrib.get("url")
+                image = element.attrib.get("url")
 
-                if url:
-                    image = url
+                if image:
                     break
 
         news.append({
             "title": title.strip(),
             "link": link.strip(),
+            "description": description or "",
+            "source": source or "Источник"
+            ,
             "image": image
         })
 
@@ -91,6 +96,9 @@ def get_news():
 
 
 def translate_text(text):
+    if not text:
+        return ""
+
     try:
         response = requests.get(
             TRANSLATE_URL,
@@ -122,44 +130,146 @@ def translate_text(text):
     return text
 
 
-def make_hashtags(title):
-    title_lower = title.lower()
+def clean_description(text):
+    if not text:
+        return ""
 
-    tags = ["#Бизнес"]
+    # Убираем HTML-теги
+    result = ""
+    inside_tag = False
 
-    if any(word in title_lower for word in [
-        "банк", "банков", "ставк", "инфляц", "эконом"
+    for char in text:
+        if char == "<":
+            inside_tag = True
+            continue
+
+        if char == ">":
+            inside_tag = False
+            continue
+
+        if not inside_tag:
+            result += char
+
+    result = html.unescape(result)
+
+    return " ".join(result.split())
+
+
+def detect_category(title):
+    text = title.lower()
+
+    if any(word in text for word in [
+        "apple", "google", "microsoft", "amazon",
+        "meta", "tesla", "nvidia", "technology",
+        "technology", "software", "ai", "artificial intelligence"
     ]):
-        tags.append("#Экономика")
+        return "💻 Технологии"
 
-    if any(word in title_lower for word in [
-        "apple", "google", "microsoft", "ai",
-        "искусственн", "технолог", "software"
+    if any(word in text for word in [
+        "stock", "stocks", "shares", "investor",
+        "investment", "market", "markets", "nasdaq",
+        "dow", "s&p", "wall street"
     ]):
-        tags.append("#Технологии")
+        return "📈 Инвестиции"
 
-    if any(word in title_lower for word in [
-        "stock", "акци", "рынок", "инвест", "бирж"
+    if any(word in text for word in [
+        "bank", "banks", "interest rate", "inflation",
+        "economy", "economic", "fed", "central bank"
     ]):
-        tags.append("#Инвестиции")
+        return "💰 Экономика"
 
-    return " ".join(tags[:3])
+    if any(word in text for word in [
+        "oil", "gas", "energy", "petrol",
+        "renewable", "electricity"
+    ]):
+        return "⚡ Энергетика"
+
+    if any(word in text for word in [
+        "startup", "startups", "venture",
+        "funding", "founder"
+    ]):
+        return "🚀 Стартапы"
+
+    return "🏢 Бизнес"
 
 
-def build_caption(title):
-    safe_title = html.escape(title)
-    hashtags = make_hashtags(title)
+def make_hashtags(category):
+    hashtags = {
+        "💻 Технологии": "#Технологии #IT",
+        "📈 Инвестиции": "#Инвестиции #Рынки",
+        "💰 Экономика": "#Экономика #Финансы",
+        "⚡ Энергетика": "#Энергетика #Бизнес",
+        "🚀 Стартапы": "#Стартапы #Инвестиции",
+        "🏢 Бизнес": "#Бизнес #Новости"
+    }
 
-    return (
-        "🏢 <b>БИЗНЕС НОВОСТИ</b>\n\n"
-        f"📰 <b>{safe_title}</b>\n\n"
-        "🌍 Мировой бизнес и экономика\n\n"
-        f"{hashtags}"
+    return hashtags.get(
+        category,
+        "#Бизнес #Новости"
     )
 
 
-def send_text(title, link):
-    caption = build_caption(title)
+def shorten_text(text, max_length=450):
+    if not text:
+        return ""
+
+    if len(text) <= max_length:
+        return text
+
+    shortened = text[:max_length]
+
+    last_space = shortened.rfind(" ")
+
+    if last_space > 100:
+        shortened = shortened[:last_space]
+
+    return shortened + "…"
+
+
+def build_caption(title, description, source):
+    category = detect_category(title)
+    hashtags = make_hashtags(category)
+
+    translated_description = translate_text(
+        clean_description(description)
+    )
+
+    translated_description = shorten_text(
+        translated_description
+    )
+
+    safe_title = html.escape(title)
+    safe_description = html.escape(
+        translated_description
+    )
+    safe_source = html.escape(source)
+
+    text = (
+        "🏢 <b>МРК | БИЗНЕС НОВОСТИ</b>\n\n"
+        f"📰 <b>{safe_title}</b>\n\n"
+        f"{category}\n\n"
+    )
+
+    if safe_description:
+        text += (
+            "📌 <b>Коротко:</b>\n"
+            f"{safe_description}\n\n"
+        )
+
+    text += (
+        f"🗞 <b>Источник:</b> {safe_source}\n\n"
+        f"{hashtags}"
+    )
+
+    return text
+
+
+def send_text(title, description, source, link):
+    caption = build_caption(
+        title,
+        description,
+        source
+    )
 
     keyboard = {
         "inline_keyboard": [
@@ -188,8 +298,18 @@ def send_text(title, link):
     response.raise_for_status()
 
 
-def send_photo(title, link, image):
-    caption = build_caption(title)
+def send_photo(
+    title,
+    description,
+    source,
+    link,
+    image
+):
+    caption = build_caption(
+        title,
+        description,
+        source
+    )
 
     keyboard = {
         "inline_keyboard": [
@@ -229,12 +349,15 @@ def main():
         if article["link"] not in posted:
             new_posts.append(article)
 
-    # Не больше 3 новостей за один запуск
+    # Максимум 3 новости за один запуск
     new_posts = new_posts[:3]
 
     for article in new_posts:
 
-        print(f"Обрабатываем: {article['title']}")
+        print(
+            f"Обрабатываем: "
+            f"{article['title']}"
+        )
 
         translated_title = translate_text(
             article["title"]
@@ -242,42 +365,58 @@ def main():
 
         try:
             if article["image"]:
+
                 send_photo(
                     translated_title,
+                    article["description"],
+                    article["source"],
                     article["link"],
                     article["image"]
                 )
 
-                print("Опубликовано с изображением")
+                print(
+                    "Опубликовано с изображением"
+                )
 
             else:
+
                 send_text(
                     translated_title,
+                    article["description"],
+                    article["source"],
                     article["link"]
                 )
 
-                print("Опубликовано без изображения")
+                print(
+                    "Опубликовано без изображения"
+                )
 
         except Exception as error:
-            print(f"Ошибка изображения: {error}")
 
-            # Если фото не удалось отправить,
-            # всё равно публикуем новость текстом
+            print(
+                f"Ошибка публикации с фото: "
+                f"{error}"
+            )
+
             send_text(
                 translated_title,
+                article["description"],
+                article["source"],
                 article["link"]
             )
 
         posted.add(article["link"])
 
         print(
-            f"Опубликовано: {translated_title}"
+            f"Опубликовано: "
+            f"{translated_title}"
         )
 
     save_posted(posted)
 
     print(
-        f"Всего опубликовано: {len(new_posts)}"
+        f"Всего опубликовано: "
+        f"{len(new_posts)}"
     )
 
 
