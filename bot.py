@@ -1,74 +1,68 @@
 import os
 import re
 import json
-import html
-import hashlib
-import tempfile
 import time
-import xml.etree.ElementTree as ET
-
+import hashlib
+import html
 from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
-from urllib.parse import quote, urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
+import xml.etree.ElementTree as ET
 
 
 # =========================================================
-# МРК BUSINESS NEWS BOT 5.0
+# МРК — БИЗНЕС НОВОСТИ
+# VERSION 5.1
 # =========================================================
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHANNEL = os.environ.get("CHANNEL", "@etomrk")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL = os.getenv("CHANNEL", "@etomrk")
 
 MAX_POSTS_PER_RUN = 2
 MIN_SCORE = 7
 MAX_CANDIDATES = 60
-
-# Максимальный возраст новости
 MAX_NEWS_AGE_HOURS = 48
 
-# Максимальный размер фотографии
+# Оставляем запас относительно лимита Telegram.
 MAX_IMAGE_SIZE = 9 * 1024 * 1024
 
 POSTED_FILE = "posted.json"
 USED_IMAGES_FILE = "used_images.json"
 
-TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
 
 # =========================================================
-# RSS ЛЕНТЫ
+# RSS
 # =========================================================
 
-FEEDS = [
+RSS_FEEDS = [
     (
         "Reuters",
-        "https://news.google.com/rss/search?q=Reuters+business+when:2d&hl=en-US&gl=US&ceid=US:en"
+        "https://news.google.com/rss/search?q=business+when:2d&hl=en-US&gl=US&ceid=US:en"
     ),
     (
         "USA",
-        "https://news.google.com/rss/search?q=USA+business+economy+companies+when:2d&hl=en-US&gl=US&ceid=US:en"
+        "https://news.google.com/rss/search?q=US+business+economy+when:2d&hl=en-US&gl=US&ceid=US:en"
     ),
     (
         "Russia",
-        "https://news.google.com/rss/search?q=Russia+business+economy+companies+when:2d&hl=en-US&gl=US&ceid=US:en"
+        "https://news.google.com/rss/search?q=Russia+business+economy+when:2d&hl=en-US&gl=US&ceid=US:en"
     ),
     (
         "Markets",
-        "https://news.google.com/rss/search?q=stock+market+markets+investors+when:2d&hl=en-US&gl=US&ceid=US:en"
+        "https://news.google.com/rss/search?q=stock+market+finance+when:2d&hl=en-US&gl=US&ceid=US:en"
     ),
     (
         "Economy",
-        "https://news.google.com/rss/search?q=economy+inflation+GDP+rates+central+bank+when:2d&hl=en-US&gl=US&ceid=US:en"
+        "https://news.google.com/rss/search?q=economy+inflation+interest+rates+when:2d&hl=en-US&gl=US&ceid=US:en"
     ),
     (
         "Technology",
-        "https://news.google.com/rss/search?q=technology+AI+chips+Microsoft+Apple+Google+Nvidia+when:2d&hl=en-US&gl=US&ceid=US:en"
+        "https://news.google.com/rss/search?q=technology+AI+chips+business+when:2d&hl=en-US&gl=US&ceid=US:en"
     ),
     (
         "Business",
-        "https://news.google.com/rss/search?q=business+companies+investment+acquisition+deal+when:2d&hl=en-US&gl=US&ceid=US:en"
+        "https://news.google.com/rss/search?q=companies+corporate+business+when:2d&hl=en-US&gl=US&ceid=US:en"
     ),
 ]
 
@@ -78,104 +72,230 @@ FEEDS = [
 # =========================================================
 
 COMPANY_WORDS = [
-    "apple", "microsoft", "google", "alphabet", "amazon",
-    "meta", "nvidia", "tesla", "openai", "samsung",
-    "intel", "oracle", "berkshire", "jpmorgan",
-    "goldman", "visa", "mastercard", "netflix",
-    "uber", "boeing", "airbus", "toyota",
-    "gazprom", "rosneft", "sberbank", "sber",
-    "yandex", "lukoil", "novatek", "vtb",
-    "alrosa", "ozon", "wildberries"
+    "company", "companies", "corporation", "corp", "firm",
+    "business", "ceo", "executive", "shares", "revenue",
+    "profit", "earnings", "merger", "acquisition", "startup",
+    "ipo", "investor", "investment"
 ]
 
 CRITICAL_WORDS = [
-    "crisis", "collapse", "bankruptcy", "default",
-    "sanctions", "war", "tariff", "emergency",
-    "ban", "shutdown", "recall", "investigation",
-    "fraud", "lawsuit", "restriction"
+    "bankruptcy", "bankrupt", "collapse", "crisis",
+    "sanctions", "sanction", "default", "war",
+    "emergency", "fraud", "investigation", "lawsuit",
+    "tariff", "tariffs", "ban", "banned", "recall"
 ]
 
 FINANCE_WORDS = [
-    "market", "markets", "stock", "stocks",
-    "shares", "investors", "investment",
-    "bank", "banks", "rate", "rates",
-    "interest", "inflation", "recession",
-    "gdp", "economy", "currency", "ruble",
-    "dollar", "euro", "bond", "bonds"
+    "bank", "banks", "fed", "federal reserve", "ecb",
+    "central bank", "interest rate", "rates", "inflation",
+    "deflation", "currency", "dollar", "euro",
+    "bond", "bonds", "debt", "credit", "loan",
+    "finance", "financial"
 ]
 
 MONEY_WORDS = [
-    "billion", "million", "trillion",
-    "investment", "acquisition", "merger",
-    "deal", "funding", "revenue",
-    "profit", "loss", "earnings",
-    "valuation", "contract"
+    "million", "billion", "trillion",
+    "million dollars", "billion dollars",
+    "revenue", "profit", "loss", "earnings",
+    "valuation", "investment", "funding"
 ]
 
 TECH_WORDS = [
-    "ai", "artificial intelligence", "chip",
-    "chips", "semiconductor", "software",
-    "cloud", "data center", "robot",
-    "robotics", "technology", "cyber"
+    "ai", "artificial intelligence", "technology",
+    "software", "chip", "chips", "semiconductor",
+    "semiconductors", "data center", "data centres",
+    "cloud", "robot", "robotics", "automation",
+    "nvidia", "microsoft", "google", "openai", "apple",
+    "meta", "amazon", "intel", "amd"
 ]
 
 USA_WORDS = [
-    "usa", "u.s.", "united states",
-    "america", "american",
-    "washington", "new york", "california"
+    "usa", "u.s.", "us ", "united states",
+    "washington", "new york", "american", "america",
+    "california", "texas", "wall street"
 ]
 
 RUSSIA_WORDS = [
     "russia", "russian", "moscow",
-    "kremlin", "rubles", "ruble",
-    "россия", "москва"
+    "gazprom", "rosneft", "sberbank",
+    "yandex", "lukoil", "novatek",
+    "vtb", "surgutneftegas", "magnit",
+    "ozon", "wildberries"
 ]
 
 MARKET_MOVE_WORDS = [
-    "surged", "jumped", "rallied",
-    "rose", "gained", "fell",
-    "dropped", "plunged", "slumped",
-    "soared", "tumbled",
-    "record high", "record low"
+    "rise", "rises", "rose", "rally",
+    "surge", "surges", "jump", "jumps",
+    "gain", "gains", "drop", "drops",
+    "fall", "falls", "fell", "plunge",
+    "plunges", "decline", "declines",
+    "selloff", "sell-off", "record high",
+    "record low"
 ]
 
 MACRO_WORDS = [
-    "inflation", "gdp", "interest rate",
-    "central bank", "fed",
-    "federal reserve", "ecb",
-    "oil prices", "unemployment",
-    "recession", "economic growth"
+    "economy", "economic", "inflation",
+    "gdp", "employment", "jobs",
+    "unemployment", "interest rates",
+    "rate cut", "rate hike",
+    "recession", "growth", "trade",
+    "tariff", "tariffs"
 ]
 
 CLICKBAIT_WORDS = [
     "you won't believe",
     "shocking",
-    "secret",
-    "this changes everything",
-    "must see",
     "unbelievable",
-    "click",
-    "viral"
+    "secret",
+    "what happens next",
+    "must see",
+    "click here",
+    "breaking!!!"
 ]
 
 LOW_VALUE_WORDS = [
-    "celebrity", "entertainment",
-    "movie", "music", "sports",
-    "football", "soccer",
-    "weather forecast"
+    "horoscope",
+    "celebrity",
+    "movie",
+    "sports",
+    "football",
+    "soccer",
+    "recipe",
+    "weather",
+    "lottery",
+    "entertainment"
 ]
 
 
 # =========================================================
-# ОБЩИЕ ФУНКЦИИ
+# ТЕМАТИКА ИЗОБРАЖЕНИЙ
+# =========================================================
+
+IMAGE_THEME_RULES = {
+    "technology": [
+        "ai", "artificial intelligence",
+        "technology", "software", "chip", "chips",
+        "semiconductor", "semiconductors",
+        "data center", "data centre",
+        "cloud", "robot", "robotics",
+        "nvidia", "microsoft", "google",
+        "openai", "apple", "meta", "amazon",
+        "intel", "amd"
+    ],
+
+    "auto": [
+        "tesla", "car", "cars", "automotive",
+        "vehicle", "vehicles", "ev",
+        "electric vehicle", "electric vehicles",
+        "automobile", "automobiles",
+        "ford", "toyota", "volkswagen",
+        "bmw", "mercedes", "gm"
+    ],
+
+    "energy": [
+        "oil", "gas", "energy", "opec",
+        "crude", "refinery", "refinery",
+        "pipeline", "petroleum",
+        "natural gas", "lng",
+        "solar", "wind power",
+        "electricity"
+    ],
+
+    "markets": [
+        "stock", "stocks", "stock market",
+        "trading", "trader", "traders",
+        "exchange", "wall street",
+        "nasdaq", "dow jones", "s&p",
+        "shares", "equity", "equities",
+        "market"
+    ],
+
+    "finance": [
+        "bank", "banks", "banking",
+        "fed", "federal reserve",
+        "ecb", "central bank",
+        "dollar", "euro", "currency",
+        "finance", "financial",
+        "credit", "loan", "bond", "bonds"
+    ],
+
+    "russia": [
+        "russia", "russian", "moscow",
+        "gazprom", "rosneft", "sberbank",
+        "yandex", "lukoil", "novatek",
+        "vtb", "surgutneftegas",
+        "magnit", "ozon", "wildberries"
+    ],
+
+    "usa": [
+        "usa", "u.s.", "united states",
+        "washington", "new york",
+        "american", "america",
+        "california", "texas",
+        "wall street"
+    ],
+
+    "real_estate": [
+        "real estate", "property",
+        "housing", "house", "homes",
+        "apartment", "apartments",
+        "construction", "building"
+    ],
+
+    "retail": [
+        "retail", "shopping", "store",
+        "stores", "consumer",
+        "walmart", "costco", "amazon",
+        "target", "sales"
+    ]
+}
+
+
+GENERIC_IMAGE_WORDS = [
+    "logo",
+    "logos",
+    "icon",
+    "icons",
+    "avatar",
+    "favicon",
+    "sprite",
+    "placeholder",
+    "default-image",
+    "default_image",
+    "no-image",
+    "no_image",
+    "thumbnail",
+    "thumb",
+    "banner",
+    "advertisement",
+    "ads",
+    "pixel"
+]
+
+
+# =========================================================
+# HTTP
+# =========================================================
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9"
+}
+
+
+# =========================================================
+# БАЗОВЫЕ ФУНКЦИИ
 # =========================================================
 
 def clean_text(text):
     if not text:
         return ""
 
-    text = html.unescape(text)
     text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
@@ -183,43 +303,23 @@ def clean_text(text):
 
 def normalize(text):
     text = clean_text(text).lower()
-
-    text = re.sub(r"https?://\S+", " ", text)
-    text = re.sub(r"[^\w\s%$€₽-]", " ", text)
+    text = re.sub(r"[^\w\s\-\.]", " ", text)
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
 
 
 def escape_html(text):
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+    return html.escape(text or "", quote=False)
 
 
-def shorten_title(title, max_length=180):
+def shorten_title(title, max_len=180):
     title = clean_text(title)
 
-    title = re.sub(
-        r"\s+[|–—-]\s+"
-        r"(Reuters|CNBC|Bloomberg|BBC|Forbes|CNN|AP News)"
-        r"\s*$",
-        "",
-        title,
-        flags=re.I
-    )
-
-    if len(title) <= max_length:
+    if len(title) <= max_len:
         return title
 
-    shortened = title[:max_length]
-
-    if " " in shortened:
-        shortened = shortened.rsplit(" ", 1)[0]
-
-    return shortened + "…"
+    return title[:max_len - 3].rstrip() + "..."
 
 
 # =========================================================
@@ -227,270 +327,167 @@ def shorten_title(title, max_length=180):
 # =========================================================
 
 def load_posted():
-    try:
-        with open(
-            POSTED_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
+    if not os.path.exists(POSTED_FILE):
+        return []
 
+    try:
+        with open(POSTED_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         if isinstance(data, list):
-            return set(data)
+            return data
 
     except Exception:
         pass
 
-    return set()
+    return []
 
 
 def save_posted(posted):
-    with open(
-        POSTED_FILE,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            sorted(list(posted)),
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
+    with open(POSTED_FILE, "w", encoding="utf-8") as f:
+        json.dump(posted[-1000:], f, ensure_ascii=False, indent=2)
 
 
 def load_used_images():
-    try:
-        with open(
-            USED_IMAGES_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
+    if not os.path.exists(USED_IMAGES_FILE):
+        return []
 
+    try:
+        with open(USED_IMAGES_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         if isinstance(data, list):
-            return set(data)
+            return data
 
     except Exception:
         pass
 
-    return set()
+    return []
 
 
-def save_used_images(used_images):
-    with open(
-        USED_IMAGES_FILE,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            sorted(list(used_images)),
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
+def save_used_images(images):
+    with open(USED_IMAGES_FILE, "w", encoding="utf-8") as f:
+        json.dump(images[-2000:], f, ensure_ascii=False, indent=2)
 
 
 # =========================================================
 # ДАТА
 # =========================================================
 
-def parse_date(date_string):
-    if not date_string:
+def parse_date(value):
+    if not value:
         return None
 
-    try:
-        dt = parsedate_to_datetime(date_string)
+    value = value.strip()
 
-        if dt.tzinfo is None:
-            dt = dt.replace(
-                tzinfo=timezone.utc
-            )
+    formats = [
+        "%a, %d %b %Y %H:%M:%S %Z",
+        "%a, %d %b %Y %H:%M:%S %z",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S"
+    ]
 
-        return dt.astimezone(timezone.utc)
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(value, fmt)
 
-    except Exception:
-        return None
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+
+            return dt
+
+        except Exception:
+            continue
+
+    return None
 
 
 def get_age_hours(dt):
     if not dt:
-        return None
+        return 0
 
     now = datetime.now(timezone.utc)
 
-    return (
-        now - dt
-    ).total_seconds() / 3600
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    seconds = (now - dt).total_seconds()
+
+    return max(0, seconds / 3600)
 
 
 # =========================================================
-# RSS
+# GOOGLE NEWS RSS
 # =========================================================
 
-def get_google_news_rss(source_name, url):
-
+def get_google_news_rss(url):
     try:
-
-        response = requests.get(
+        r = requests.get(
             url,
-            timeout=20,
-            headers={
-                "User-Agent":
-                    "Mozilla/5.0 "
-                    "(compatible; MRKBusinessBot/5.0)"
-            }
+            headers=HEADERS,
+            timeout=20
         )
 
-        response.raise_for_status()
+        r.raise_for_status()
 
-        root = ET.fromstring(
-            response.content
-        )
-
-        return parse_rss(
-            root,
-            source_name
-        )
+        return r.text
 
     except Exception as e:
-
-        print(
-            f"RSS error [{source_name}]: {e}"
-        )
-
-        return []
+        print("RSS ERROR:", e)
+        return ""
 
 
-def parse_rss(root, source_name):
-
+def parse_rss(xml_text, feed_name):
     articles = []
 
-    namespaces = {
-        "media":
-            "http://search.yahoo.com/mrss/"
-    }
+    if not xml_text:
+        return articles
+
+    try:
+        root = ET.fromstring(xml_text)
+
+    except Exception as e:
+        print("XML ERROR:", e)
+        return articles
 
     for item in root.findall(".//item"):
 
         title = clean_text(
-            item.findtext(
-                "title",
-                ""
-            )
+            item.findtext("title", "")
         )
 
         link = clean_text(
-            item.findtext(
-                "link",
-                ""
-            )
+            item.findtext("link", "")
         )
 
         description = clean_text(
-            item.findtext(
-                "description",
-                ""
-            )
+            item.findtext("description", "")
         )
 
         pub_date = clean_text(
-            item.findtext(
-                "pubDate",
-                ""
-            )
+            item.findtext("pubDate", "")
         )
 
-        source = source_name
-
-        source_element = item.find(
-            "source"
+        source = clean_text(
+            item.findtext("{http://search.yahoo.com/mrss/}source", "")
         )
 
-        if source_element is not None:
-
-            source_text = clean_text(
-                source_element.text or ""
-            )
-
-            if source_text:
-                source = source_text
-
-        image_url = None
-
-        # media:content
-        media_content = item.find(
-            "media:content",
-            namespaces
-        )
-
-        if media_content is not None:
-
-            image_url = (
-                media_content.attrib.get(
-                    "url"
-                )
-                or media_content.attrib.get(
-                    "href"
-                )
-            )
-
-        # media:thumbnail
-        if not image_url:
-
-            media_thumbnail = item.find(
-                "media:thumbnail",
-                namespaces
-            )
-
-            if media_thumbnail is not None:
-
-                image_url = (
-                    media_thumbnail.attrib.get(
-                        "url"
-                    )
-                    or media_thumbnail.attrib.get(
-                        "href"
-                    )
-                )
-
-        # enclosure
-        if not image_url:
-
-            enclosure = item.find(
-                "enclosure"
-            )
-
-            if enclosure is not None:
-
-                enc_type = enclosure.attrib.get(
-                    "type",
-                    ""
-                )
-
-                if enc_type.startswith(
-                    "image/"
-                ):
-
-                    image_url = (
-                        enclosure.attrib.get(
-                            "url"
-                        )
-                    )
+        if not source:
+            source = feed_name
 
         if not title or not link:
             continue
 
+        dt = parse_date(pub_date)
+
         articles.append({
             "title": title,
             "description": description,
-            "link": link,
-            "date": parse_date(pub_date),
+            "url": link,
+            "date": dt,
             "source": source,
-            "rss_image": image_url
+            "feed": feed_name
         })
 
     return articles
@@ -501,328 +498,215 @@ def parse_rss(root, source_name):
 # =========================================================
 
 def detect_category(article):
-
     text = normalize(
-        article["title"]
-        + " "
-        + article["description"]
+        article.get("title", "") + " " +
+        article.get("description", "")
     )
 
-    if any(
-        word in text
-        for word in RUSSIA_WORDS
-    ):
-        return "🇷🇺 Россия"
+    scores = {
+        "Технологии": 0,
+        "Финансы": 0,
+        "Рынки": 0,
+        "Энергетика": 0,
+        "Россия": 0,
+        "США": 0,
+        "Экономика": 0,
+        "Бизнес": 0
+    }
+
+    for word in TECH_WORDS:
+        if word in text:
+            scores["Технологии"] += 3
+
+    for word in FINANCE_WORDS:
+        if word in text:
+            scores["Финансы"] += 3
+
+    for word in MARKET_MOVE_WORDS:
+        if word in text:
+            scores["Рынки"] += 2
+
+    for word in RUSSIA_WORDS:
+        if word in text:
+            scores["Россия"] += 3
+
+    for word in USA_WORDS:
+        if word in text:
+            scores["США"] += 2
+
+    for word in MACRO_WORDS:
+        if word in text:
+            scores["Экономика"] += 2
+
+    for word in COMPANY_WORDS:
+        if word in text:
+            scores["Бизнес"] += 1
 
     if any(
-        word in text
-        for word in USA_WORDS
+        x in text
+        for x in ["oil", "gas", "energy", "opec", "crude"]
     ):
-        return "🇺🇸 США"
+        scores["Энергетика"] += 5
 
-    if any(
-        word in text
-        for word in TECH_WORDS
-    ):
-        return "💻 Технологии"
+    category = max(
+        scores,
+        key=scores.get
+    )
 
-    if any(
-        word in text
-        for word in MACRO_WORDS
-    ):
-        return "📈 Экономика"
+    if scores[category] == 0:
+        category = "Бизнес"
 
-    if any(
-        word in text
-        for word in MARKET_MOVE_WORDS
-    ):
-        return "💰 Рынки"
-
-    if any(
-        word in text
-        for word in FINANCE_WORDS
-    ):
-        return "💰 Финансы"
-
-    if any(
-        word in text
-        for word in MONEY_WORDS
-    ):
-        return "🏢 Бизнес"
-
-    return "📰 Деловые новости"
+    return category
 
 
 # =========================================================
-# РЕЙТИНГ
+# ОЦЕНКА НОВОСТИ
 # =========================================================
 
 def calculate_score(article):
-
-    title = normalize(
-        article["title"]
-    )
-
-    description = normalize(
-        article["description"]
-    )
+    title = normalize(article.get("title", ""))
+    description = normalize(article.get("description", ""))
 
     text = title + " " + description
 
-    score = 5.0
-
-    # Компания
-    company_hits = sum(
-        1
-        for word in COMPANY_WORDS
-        if word in text
-    )
-
-    score += min(
-        company_hits * 1.2,
-        3.0
-    )
-
-    # Критические события
-    critical_hits = sum(
-        1
-        for word in CRITICAL_WORDS
-        if word in text
-    )
-
-    score += min(
-        critical_hits * 1.5,
-        4.0
-    )
-
-    # Финансы
-    finance_hits = sum(
-        1
-        for word in FINANCE_WORDS
-        if word in text
-    )
-
-    score += min(
-        finance_hits * 0.4,
-        2.5
-    )
-
-    # Деньги
-    money_hits = sum(
-        1
-        for word in MONEY_WORDS
-        if word in text
-    )
-
-    score += min(
-        money_hits * 0.7,
-        3.0
-    )
-
-    # Технологии
-    tech_hits = sum(
-        1
-        for word in TECH_WORDS
-        if word in text
-    )
-
-    score += min(
-        tech_hits * 0.5,
-        2.0
-    )
-
-    # Макроэкономика
-    macro_hits = sum(
-        1
-        for word in MACRO_WORDS
-        if word in text
-    )
-
-    score += min(
-        macro_hits * 0.8,
-        2.5
-    )
-
-    # Движение рынка
-    market_hits = sum(
-        1
-        for word in MARKET_MOVE_WORDS
-        if word in text
-    )
-
-    score += min(
-        market_hits * 0.8,
-        2.5
-    )
-
-    # Миллиарды / триллионы
-    if re.search(
-        r"\$?\d+(?:[.,]\d+)?\s*"
-        r"(billion|bn|trillion|tn)",
-        text
-    ):
-        score += 2.5
-
-    # Проценты
-    if re.search(
-        r"\d+(?:[.,]\d+)?\s*%",
-        text
-    ):
-        score += 1.0
-
-    # Срочность
-    urgency_words = [
-        "breaking",
-        "urgent",
-        "just announced",
-        "today",
-        "now",
-        "immediately"
-    ]
-
-    urgency_hits = sum(
-        1
-        for word in urgency_words
-        if word in text
-    )
-
-    score += min(
-        urgency_hits * 0.8,
-        2.0
-    )
-
-    # Источник
-    source = article[
-        "source"
-    ].lower()
-
-    if "reuters" in source:
-        score += 2.5
-
-    elif "bloomberg" in source:
-        score += 2.0
-
-    elif "cnbc" in source:
-        score += 1.5
-
-    elif "financial times" in source:
-        score += 1.5
+    score = 0
 
     # Свежесть
-    age = get_age_hours(
-        article["date"]
-    )
+    age = get_age_hours(article.get("date"))
 
-    if age is not None:
+    if age <= 3:
+        score += 5
+    elif age <= 8:
+        score += 4
+    elif age <= 18:
+        score += 3
+    elif age <= 30:
+        score += 2
+    elif age <= 48:
+        score += 1
 
-        if age <= 6:
-            score += 2.0
+    # Бизнес
+    for word in COMPANY_WORDS:
+        if word in text:
+            score += 1
 
-        elif age <= 24:
-            score += 1.0
+    # Деньги
+    for word in MONEY_WORDS:
+        if word in text:
+            score += 2
 
-        elif age <= 48:
-            score += 0
+    # Финансы
+    for word in FINANCE_WORDS:
+        if word in text:
+            score += 2
 
-        else:
-            score -= 4.0
+    # Технологии
+    for word in TECH_WORDS:
+        if word in text:
+            score += 2
 
-    # Низкая ценность
-    low_value_hits = sum(
-        1
-        for word in LOW_VALUE_WORDS
-        if word in text
-    )
+    # Макроэкономика
+    for word in MACRO_WORDS:
+        if word in text:
+            score += 2
 
-    score -= min(
-        low_value_hits * 1.5,
-        4.0
-    )
+    # Резкие движения рынка
+    for word in MARKET_MOVE_WORDS:
+        if word in text:
+            score += 2
 
-    return round(
-        max(score, 0),
-        1
-    )
+    # Крупные события
+    for word in CRITICAL_WORDS:
+        if word in text:
+            score += 4
+
+    # США / Россия
+    for word in USA_WORDS:
+        if word in text:
+            score += 1
+
+    for word in RUSSIA_WORDS:
+        if word in text:
+            score += 2
+
+    score -= clickbait_penalty(text)
+
+    for word in LOW_VALUE_WORDS:
+        if word in text:
+            score -= 6
+
+    return score
 
 
-# =========================================================
-# КЛИКБЕЙТ
-# =========================================================
-
-def clickbait_penalty(article):
-
-    text = normalize(
-        article["title"]
-    )
-
+def clickbait_penalty(text):
     penalty = 0
 
     for word in CLICKBAIT_WORDS:
-
         if word in text:
-            penalty += 1
+            penalty += 4
 
-    if "?" in article["title"]:
-        penalty += 0.5
+    if text.count("!") >= 3:
+        penalty += 3
 
     return penalty
 
 
 # =========================================================
-# ДУБЛИКАТЫ НОВОСТЕЙ
+# ВАЖНЫЕ СЛОВА
 # =========================================================
 
 def important_words(text):
+    text = normalize(text)
 
-    words = normalize(
-        text
-    ).split()
-
-    stopwords = {
-        "the", "a", "an", "and",
-        "or", "of", "to", "in",
-        "on", "for", "with",
-        "from", "by", "as",
-        "at", "is", "are",
-        "was", "were", "this",
-        "that", "new", "after",
-        "before"
-    }
-
-    return {
-        word
-        for word in words
-        if len(word) >= 4
-        and word not in stopwords
-    }
-
-
-def similarity(title1, title2):
-
-    a = important_words(
-        title1
+    words = re.findall(
+        r"\b[a-zа-яё0-9][a-zа-яё0-9\-]{3,}\b",
+        text,
+        flags=re.IGNORECASE
     )
 
-    b = important_words(
-        title2
+    stop_words = {
+        "this", "that", "with", "from", "have",
+        "will", "about", "after", "before",
+        "into", "their", "they", "them",
+        "were", "been", "said", "says",
+        "which", "when", "where", "what",
+        "как", "это", "для", "что", "при",
+        "после", "перед", "также", "будет",
+        "был", "была", "были"
+    }
+
+    result = []
+
+    for word in words:
+        if word not in stop_words and word not in result:
+            result.append(word)
+
+    return result[:25]
+
+
+# =========================================================
+# СХОЖЕСТЬ НОВОСТЕЙ
+# =========================================================
+
+def similarity(a, b):
+    a_words = set(
+        important_words(a.get("title", ""))
     )
 
-    if not a or not b:
+    b_words = set(
+        important_words(b.get("title", ""))
+    )
+
+    if not a_words or not b_words:
         return 0
 
-    intersection = len(
-        a & b
-    )
+    intersection = len(a_words & b_words)
+    union = len(a_words | b_words)
 
-    union = len(
-        a | b
-    )
-
-    return intersection / union
+    return intersection / union if union else 0
 
 
 def remove_similar_news(articles):
-
     result = []
 
     for article in articles:
@@ -831,32 +715,12 @@ def remove_similar_news(articles):
 
         for existing in result:
 
-            sim = similarity(
-                article["title"],
-                existing["title"]
-            )
-
-            if sim >= 0.50:
-
+            if similarity(article, existing) >= 0.55:
                 duplicate = True
-
-                if (
-                    article["score"]
-                    > existing["score"]
-                ):
-
-                    result.remove(
-                        existing
-                    )
-
-                    duplicate = False
-
                 break
 
         if not duplicate:
-            result.append(
-                article
-            )
+            result.append(article)
 
     return result
 
@@ -866,174 +730,125 @@ def remove_similar_news(articles):
 # =========================================================
 
 def translate_text(text):
-
-    text = clean_text(
-        text
-    )
+    text = clean_text(text)
 
     if not text:
         return ""
 
+    # Уже русский
     cyrillic = len(
-        re.findall(
-            r"[А-Яа-яЁё]",
-            text
-        )
+        re.findall(r"[а-яё]", text.lower())
     )
 
     latin = len(
-        re.findall(
-            r"[A-Za-z]",
-            text
-        )
+        re.findall(r"[a-z]", text.lower())
     )
 
     if cyrillic > latin:
         return text
 
     try:
+        url = "https://api.mymemory.translated.net/get"
 
-        url = (
-            "https://api.mymemory.translated.net/get"
-            "?q="
-            + quote(text[:4500])
-            + "&langpair=en|ru"
-        )
+        params = {
+            "q": text[:4500],
+            "langpair": "en|ru"
+        }
 
-        response = requests.get(
+        r = requests.get(
             url,
-            timeout=15
+            params=params,
+            timeout=20
         )
 
-        data = response.json()
+        data = r.json()
 
-        translated = (
-            data.get(
-                "responseData",
-                {}
-            ).get(
-                "translatedText",
-                ""
-            )
+        translated = data.get(
+            "responseData", {}
+        ).get(
+            "translatedText", ""
         )
 
         if translated:
-            return clean_text(
-                translated
-            )
+            return clean_text(translated)
 
     except Exception as e:
-
-        print(
-            "Translation error:",
-            e
-        )
+        print("TRANSLATION ERROR:", e)
 
     return text
 
 
 # =========================================================
-# МРК АНАЛИТИКА
+# АНАЛИЗ
 # =========================================================
 
 def generate_analysis(article):
+    category = detect_category(article)
 
+    title = article.get("title", "")
     text = normalize(
-        article["title"]
-        + " "
-        + article["description"]
+        title + " " +
+        article.get("description", "")
     )
 
-    company = any(
-        word in text
-        for word in COMPANY_WORDS
-    )
+    reasons = []
 
-    money = any(
-        word in text
-        for word in MONEY_WORDS
-    )
-
-    market = any(
-        word in text
-        for word in MARKET_MOVE_WORDS
-    )
-
-    macro = any(
-        word in text
-        for word in MACRO_WORDS
-    )
-
-    tech = any(
-        word in text
-        for word in TECH_WORDS
-    )
-
-    critical = any(
+    if any(
         word in text
         for word in CRITICAL_WORDS
-    )
-
-    if critical and market:
-
-        return (
-            "Событие может оказать заметное "
-            "влияние на рыночные настроения. "
-            "Инвесторы будут оценивать риски "
-            "для компаний и связанных активов."
+    ):
+        reasons.append(
+            "событие может существенно повлиять на рынок"
         )
 
-    if money:
-
-        return (
-            "Ключевой фактор — финансовый "
-            "масштаб события. Крупные сделки, "
-            "инвестиции и изменения прибыли "
-            "могут повлиять на оценку компании "
-            "и ожидания инвесторов."
+    if any(
+        word in text
+        for word in FINANCE_WORDS
+    ):
+        reasons.append(
+            "новость связана с финансовыми условиями"
         )
 
-    if market:
-
-        return (
-            "Главное значение новости — возможная "
-            "реакция рынка. Изменение ожиданий "
-            "инвесторов может отразиться "
-            "на котировках компаний и активов."
+    if any(
+        word in text
+        for word in MARKET_MOVE_WORDS
+    ):
+        reasons.append(
+            "в публикации отмечается заметное движение рынка"
         )
 
-    if macro:
-
-        return (
-            "Новость важна для экономики в целом. "
-            "Изменение ставок, инфляции или "
-            "экономического роста может повлиять "
-            "на стоимость денег, спрос и инвестиции."
+    if any(
+        word in text
+        for word in TECH_WORDS
+    ):
+        reasons.append(
+            "событие имеет значение для технологического сектора"
         )
 
-    if tech:
-
-        return (
-            "Событие имеет значение для "
-            "технологического сектора и может "
-            "повлиять на конкуренцию, инвестиции "
-            "и дальнейшее развитие рынка."
+    if any(
+        word in text
+        for word in RUSSIA_WORDS
+    ):
+        reasons.append(
+            "новость связана с российским рынком"
         )
 
-    if company:
+    if any(
+        word in text
+        for word in USA_WORDS
+    ):
+        reasons.append(
+            "событие связано с экономикой США"
+        )
 
-        return (
-            "Для бизнеса это важно из-за "
-            "возможного влияния на стратегию "
-            "компании, финансовые показатели "
-            "и её позицию на рынке."
+    if not reasons:
+        reasons.append(
+            "новость может представлять интерес для деловой аудитории"
         )
 
     return (
-        "Новость представляет интерес для "
-        "деловой аудитории, поскольку может "
-        "повлиять на бизнес-среду, рынки "
-        "или экономические ожидания."
+        f"<b>Почему это важно:</b> "
+        f"{reasons[0].capitalize()}."
     )
 
 
@@ -1042,56 +857,22 @@ def generate_analysis(article):
 # =========================================================
 
 def generate_hashtags(article):
+    category = detect_category(article)
 
-    text = normalize(
-        article["title"]
-        + " "
-        + article["description"]
-    )
+    hashtags = {
+        "Технологии": "#технологии #AI #бизнес",
+        "Финансы": "#финансы #экономика #деньги",
+        "Рынки": "#рынки #акции #инвестиции",
+        "Энергетика": "#энергетика #нефть #газ",
+        "Россия": "#Россия #бизнес #экономика",
+        "США": "#США #экономика #бизнес",
+        "Экономика": "#экономика #рынки #бизнес",
+        "Бизнес": "#бизнес #экономика #компании"
+    }
 
-    tags = [
-        "#МРК",
-        "#БизнесНовости"
-    ]
-
-    if any(
-        word in text
-        for word in USA_WORDS
-    ):
-        tags.append("#США")
-
-    if any(
-        word in text
-        for word in RUSSIA_WORDS
-    ):
-        tags.append("#Россия")
-
-    if any(
-        word in text
-        for word in TECH_WORDS
-    ):
-        tags.append("#Технологии")
-
-    if any(
-        word in text
-        for word in MACRO_WORDS
-    ):
-        tags.append("#Экономика")
-
-    if any(
-        word in text
-        for word in MARKET_MOVE_WORDS
-    ):
-        tags.append("#Рынки")
-
-    if any(
-        word in text
-        for word in MONEY_WORDS
-    ):
-        tags.append("#Бизнес")
-
-    return " ".join(
-        dict.fromkeys(tags)
+    return hashtags.get(
+        category,
+        "#бизнес #экономика"
     )
 
 
@@ -1100,120 +881,77 @@ def generate_hashtags(article):
 # =========================================================
 
 def format_post(article):
-
-    category = article[
-        "category"
-    ]
-
-    title_ru = shorten_title(
-        translate_text(
-            article["title"]
-        ),
-        180
+    title_ru = translate_text(
+        article.get("title", "")
     )
 
     description_ru = translate_text(
-        article["description"]
+        article.get("description", "")
     )
 
-    if len(description_ru) > 450:
-
-        description_ru = (
-            description_ru[:450]
-            .rsplit(" ", 1)[0]
-            + "…"
-        )
-
-    analysis = generate_analysis(
-        article
+    title_ru = shorten_title(
+        title_ru,
+        180
     )
 
-    source = escape_html(
-        article["source"]
-    )
-
-    title_ru = escape_html(
-        title_ru
-    )
-
-    description_ru = escape_html(
+    description_ru = clean_text(
         description_ru
     )
 
-    analysis = escape_html(
-        analysis
-    )
-
-    date_text = ""
-
-    if article["date"]:
-
-        local_date = (
-            article["date"]
-            .astimezone()
+    if len(description_ru) > 500:
+        description_ru = (
+            description_ru[:497].rstrip()
+            + "..."
         )
 
-        date_text = local_date.strftime(
-            "%d.%m.%Y %H:%M"
-        )
+    category = detect_category(article)
 
-    hashtags = generate_hashtags(
-        article
+    analysis = generate_analysis(article)
+
+    hashtags = generate_hashtags(article)
+
+    source = clean_text(
+        article.get("source", "Источник")
     )
 
-    text = (
-        f"<b>{category}</b>\n\n"
-        f"<b>{title_ru}</b>\n\n"
+    parts = []
+
+    parts.append(
+        f"<b>🔥 {escape_html(title_ru)}</b>"
     )
 
     if description_ru:
-
-        text += (
-            f"{description_ru}\n\n"
+        parts.append(
+            escape_html(description_ru)
         )
 
-    text += (
-        f"📊 <b>МРК Аналитика</b>\n"
-        f"{analysis}\n\n"
-        f"⭐ <b>Важность:</b> "
-        f"{article['score']}/10\n"
+    parts.append(
+        f"<b>Категория:</b> "
+        f"#{escape_html(category.replace(' ', ''))}"
     )
 
-    if date_text:
+    parts.append(analysis)
 
-        text += (
-            f"🕐 <b>Дата:</b> "
-            f"{date_text}\n"
-        )
-
-    text += (
-        f"📰 <b>Источник:</b> "
-        f"{source}\n\n"
-        f"{hashtags}"
+    parts.append(
+        f"<i>Источник: {escape_html(source)}</i>"
     )
 
-    if len(text) > 1000:
+    parts.append(hashtags)
 
-        text = (
-            text[:995]
-            + "…"
-        )
-
-    return text
+    return "\n\n".join(parts)
 
 
 # =========================================================
-# TELEGRAM КНОПКА
+# КНОПКА
 # =========================================================
 
-def get_keyboard(url):
-
+def get_keyboard(article):
     return {
         "inline_keyboard": [
             [
                 {
                     "text": "📰 Читать источник",
-                    "url": url
+                    "url": article.get("url", "")
                 }
             ]
         ]
@@ -1221,421 +959,686 @@ def get_keyboard(url):
 
 
 # =========================================================
-# ПОИСК КАРТИНОК НА СТРАНИЦЕ
+# IMAGE CANDIDATES
 # =========================================================
+
+def add_image_candidate(
+    candidates,
+    url,
+    source_type,
+    alt="",
+    title="",
+    context=""
+):
+    if not url:
+        return
+
+    url = url.strip()
+
+    if url.startswith("//"):
+        url = "https:" + url
+
+    if not url.startswith(("http://", "https://")):
+        return
+
+    candidates.append({
+        "url": url,
+        "source_type": source_type,
+        "alt": clean_text(alt),
+        "title": clean_text(title),
+        "context": clean_text(context)
+    })
+
+
+def extract_srcset(srcset):
+    result = []
+
+    if not srcset:
+        return result
+
+    for item in srcset.split(","):
+        item = item.strip()
+
+        if not item:
+            continue
+
+        parts = item.split()
+
+        if parts:
+            result.append(parts[0])
+
+    return result
+
 
 def extract_image_candidates(
     page_html,
     page_url
 ):
-
     candidates = []
-
-    def add(url):
-
-        if not url:
-            return
-
-        url = html.unescape(
-            url
-        ).strip()
-
-        if url.startswith("//"):
-            url = "https:" + url
-
-        url = urljoin(
-            page_url,
-            url
-        )
-
-        if (
-            url.startswith("http://")
-            or url.startswith("https://")
-        ):
-
-            if url not in candidates:
-                candidates.append(url)
 
     # -----------------------------------------------------
     # OG IMAGE
     # -----------------------------------------------------
 
-    patterns = [
-
-        r'<meta[^>]+property=["\']og:image["\']'
-        r'[^>]+content=["\']([^"\']+)',
-
-        r'<meta[^>]+content=["\']([^"\']+)["\']'
-        r'[^>]+property=["\']og:image',
-
-        r'<meta[^>]+name=["\']twitter:image["\']'
-        r'[^>]+content=["\']([^"\']+)',
-
-        r'<meta[^>]+content=["\']([^"\']+)["\']'
-        r'[^>]+name=["\']twitter:image'
+    og_patterns = [
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']'
     ]
 
-    for pattern in patterns:
-
-        for match in re.finditer(
+    for pattern in og_patterns:
+        for match in re.findall(
             pattern,
             page_html,
-            flags=re.I
+            flags=re.IGNORECASE
         ):
-
-            add(
-                match.group(1)
+            add_image_candidate(
+                candidates,
+                urljoin(page_url, match),
+                "og"
             )
 
     # -----------------------------------------------------
-    # LINK IMAGE
+    # TWITTER IMAGE
     # -----------------------------------------------------
 
-    for match in re.finditer(
-        r'<link[^>]+rel=["\'][^"\']*image_src'
-        r'[^"\']*["\'][^>]+href=["\']([^"\']+)',
-        page_html,
-        flags=re.I
-    ):
+    twitter_patterns = [
+        r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']'
+    ]
 
-        add(
-            match.group(1)
-        )
+    for pattern in twitter_patterns:
+        for match in re.findall(
+            pattern,
+            page_html,
+            flags=re.IGNORECASE
+        ):
+            add_image_candidate(
+                candidates,
+                urljoin(page_url, match),
+                "twitter"
+            )
+
+    # -----------------------------------------------------
+    # IMAGE_SRC
+    # -----------------------------------------------------
+
+    image_src_patterns = [
+        r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)',
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']image_src["\']'
+    ]
+
+    for pattern in image_src_patterns:
+        for match in re.findall(
+            pattern,
+            page_html,
+            flags=re.IGNORECASE
+        ):
+            add_image_candidate(
+                candidates,
+                urljoin(page_url, match),
+                "image_src"
+            )
 
     # -----------------------------------------------------
     # JSON-LD IMAGE
     # -----------------------------------------------------
 
-    for match in re.finditer(
-        r'"image"\s*:\s*"([^"]+)"',
+    jsonld_blocks = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         page_html,
-        flags=re.I
-    ):
+        flags=re.IGNORECASE | re.DOTALL
+    )
 
-        add(
-            match.group(1)
-        )
+    for block in jsonld_blocks:
+
+        try:
+            data = json.loads(
+                html.unescape(block.strip())
+            )
+
+            objects = (
+                data
+                if isinstance(data, list)
+                else [data]
+            )
+
+            for obj in objects:
+
+                if not isinstance(obj, dict):
+                    continue
+
+                image = obj.get("image")
+
+                if isinstance(image, str):
+                    add_image_candidate(
+                        candidates,
+                        urljoin(page_url, image),
+                        "jsonld"
+                    )
+
+                elif isinstance(image, list):
+
+                    for img in image[:5]:
+
+                        if isinstance(img, str):
+                            add_image_candidate(
+                                candidates,
+                                urljoin(page_url, img),
+                                "jsonld"
+                            )
+
+                        elif isinstance(img, dict):
+                            img_url = img.get("url")
+
+                            if img_url:
+                                add_image_candidate(
+                                    candidates,
+                                    urljoin(
+                                        page_url,
+                                        img_url
+                                    ),
+                                    "jsonld"
+                                )
+
+                elif isinstance(image, dict):
+
+                    img_url = image.get("url")
+
+                    if img_url:
+                        add_image_candidate(
+                            candidates,
+                            urljoin(
+                                page_url,
+                                img_url
+                            ),
+                            "jsonld"
+                        )
+
+        except Exception:
+            continue
 
     # -----------------------------------------------------
-    # IMG TAGS
+    # FIGURE / IMG
     # -----------------------------------------------------
 
-    for match in re.finditer(
-        r"<img\b[^>]+>",
-        page_html,
-        flags=re.I
-    ):
+    img_pattern = re.compile(
+        r"<img\b([^>]+)>",
+        flags=re.IGNORECASE | re.DOTALL
+    )
 
-        tag = match.group(0)
+    for match in img_pattern.finditer(page_html):
 
-        # src
+        attrs = match.group(1)
+
+        src = ""
+
         src_match = re.search(
             r'\bsrc=["\']([^"\']+)',
-            tag,
-            flags=re.I
+            attrs,
+            flags=re.IGNORECASE
         )
 
         if src_match:
-            add(
-                src_match.group(1)
+            src = src_match.group(1)
+
+        if not src:
+
+            data_src_match = re.search(
+                r'\bdata-src=["\']([^"\']+)',
+                attrs,
+                flags=re.IGNORECASE
             )
 
-        # data-src
-        data_src_match = re.search(
-            r'\bdata-src=["\']([^"\']+)',
-            tag,
-            flags=re.I
+            if data_src_match:
+                src = data_src_match.group(1)
+
+        if not src:
+            data_lazy_match = re.search(
+                r'\bdata-lazy-src=["\']([^"\']+)',
+                attrs,
+                flags=re.IGNORECASE
+            )
+
+            if data_lazy_match:
+                src = data_lazy_match.group(1)
+
+        if not src:
+            continue
+
+        alt_match = re.search(
+            r'\balt=["\']([^"\']*)',
+            attrs,
+            flags=re.IGNORECASE
         )
 
-        if data_src_match:
-            add(
-                data_src_match.group(1)
-            )
+        title_match = re.search(
+            r'\btitle=["\']([^"\']*)',
+            attrs,
+            flags=re.IGNORECASE
+        )
 
-        # srcset — берём последнее/самое большое
+        alt = (
+            alt_match.group(1)
+            if alt_match
+            else ""
+        )
+
+        title = (
+            title_match.group(1)
+            if title_match
+            else ""
+        )
+
+        # Контекст вокруг изображения
+        start = max(
+            0,
+            match.start() - 700
+        )
+
+        end = min(
+            len(page_html),
+            match.end() + 700
+        )
+
+        context = clean_text(
+            page_html[start:end]
+        )
+
+        add_image_candidate(
+            candidates,
+            urljoin(page_url, src),
+            "img",
+            alt=alt,
+            title=title,
+            context=context
+        )
+
+        # srcset
         srcset_match = re.search(
             r'\bsrcset=["\']([^"\']+)',
-            tag,
-            flags=re.I
+            attrs,
+            flags=re.IGNORECASE
         )
 
         if srcset_match:
 
-            srcset = (
+            for srcset_url in extract_srcset(
                 srcset_match.group(1)
-            )
-
-            parts = srcset.split(",")
-
-            for part in reversed(parts):
-
-                part = part.strip()
-
-                if not part:
-                    continue
-
-                image_url = part.split()[0]
-
-                add(
-                    image_url
+            ):
+                add_image_candidate(
+                    candidates,
+                    urljoin(
+                        page_url,
+                        srcset_url
+                    ),
+                    "srcset",
+                    alt=alt,
+                    title=title,
+                    context=context
                 )
 
-                break
+    # -----------------------------------------------------
+    # Удаляем дубликаты
+    # -----------------------------------------------------
 
-    return candidates
+    unique = []
+    seen = set()
+
+    for candidate in candidates:
+
+        url = candidate["url"]
+
+        if url in seen:
+            continue
+
+        seen.add(url)
+        unique.append(candidate)
+
+    return unique
 
 
 # =========================================================
-# ПОЛУЧЕНИЕ КАРТИНОК
+# ПОЛУЧЕНИЕ КАНДИДАТОВ ИЗ СТРАНИЦЫ
 # =========================================================
 
-def get_article_images(
-    article
-):
+def get_article_images(article):
+    url = article.get("url")
 
-    candidates = []
-
-    # RSS
-    if article.get(
-        "rss_image"
-    ):
-
-        candidates.append(
-            article["rss_image"]
-        )
+    if not url:
+        return []
 
     try:
-
-        response = requests.get(
-            article["link"],
-            timeout=20,
-            headers={
-                "User-Agent":
-                    "Mozilla/5.0 "
-                    "(iPhone; CPU iPhone OS 18_0 like Mac OS X) "
-                    "AppleWebKit/605.1.15 "
-                    "Version/18.0 Mobile/15E148 Safari/604.1",
-                "Accept":
-                    "text/html,application/xhtml+xml"
-            },
-            allow_redirects=True
+        r = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=20
         )
 
-        if response.status_code == 200:
+        r.raise_for_status()
 
-            page_url = response.url
-
-            page_images = (
-                extract_image_candidates(
-                    response.text,
-                    page_url
-                )
-            )
-
-            candidates.extend(
-                page_images
-            )
+        return extract_image_candidates(
+            r.text,
+            r.url
+        )
 
     except Exception as e:
-
         print(
-            "Page image search error:",
+            "ARTICLE IMAGE ERROR:",
+            article.get("title"),
             e
         )
 
-    # Уникальные URL
-    unique = []
-
-    for url in candidates:
-
-        if (
-            url
-            and url not in unique
-        ):
-
-            unique.append(url)
-
-    # Ограничиваем количество попыток
-    return unique[:15]
+        return []
 
 
 # =========================================================
-# ХЭШ ФАЙЛА
+# ТЕМАТИЧЕСКИЙ СКОРИНГ КАРТИНКИ
 # =========================================================
 
-def image_hash(filename):
+def get_article_image_context(article):
+    title = article.get("title", "")
+    description = article.get("description", "")
 
-    try:
+    category = detect_category(article)
 
-        sha = hashlib.sha256()
+    text = normalize(
+        title + " " +
+        description
+    )
 
-        with open(
-            filename,
-            "rb"
-        ) as f:
-
-            while True:
-
-                chunk = f.read(
-                    8192
-                )
-
-                if not chunk:
-                    break
-
-                sha.update(
-                    chunk
-                )
-
-        return sha.hexdigest()
-
-    except Exception:
-        return None
+    return {
+        "text": text,
+        "title": normalize(title),
+        "description": normalize(description),
+        "category": category
+    }
 
 
-# =========================================================
-# СКАЧИВАНИЕ КАРТИНКИ
-# =========================================================
-
-def download_image(
-    image_url
+def image_candidate_score(
+    article,
+    candidate
 ):
+    context = get_article_image_context(
+        article
+    )
 
-    if not image_url:
-        return None
+    article_text = context["text"]
+    article_title = context["title"]
+    category = context["category"]
 
-    try:
+    metadata = normalize(
+        candidate.get("alt", "") + " " +
+        candidate.get("title", "") + " " +
+        candidate.get("context", "") + " " +
+        candidate.get("url", "")
+    )
 
-        response = requests.get(
-            image_url,
-            timeout=20,
-            headers={
-                "User-Agent":
-                    "Mozilla/5.0",
-                "Accept":
-                    "image/avif,image/webp,"
-                    "image/apng,image/svg+xml,"
-                    "image/*,*/*;q=0.8"
-            },
-            stream=True,
-            allow_redirects=True
+    score = 0
+
+    # -----------------------------------------------------
+    # Приоритет официальных изображений
+    # -----------------------------------------------------
+
+    source_type = candidate.get(
+        "source_type",
+        ""
+    )
+
+    source_scores = {
+        "og": 6,
+        "twitter": 5,
+        "jsonld": 5,
+        "image_src": 4,
+        "rss": 4,
+        "srcset": 3,
+        "img": 2
+    }
+
+    score += source_scores.get(
+        source_type,
+        1
+    )
+
+    # -----------------------------------------------------
+    # Ключевые слова темы
+    # -----------------------------------------------------
+
+    category_map = {
+        "Технологии": "technology",
+        "Финансы": "finance",
+        "Рынки": "markets",
+        "Энергетика": "energy",
+        "Россия": "russia",
+        "США": "usa"
+    }
+
+    theme = category_map.get(
+        category
+    )
+
+    if theme:
+
+        for word in IMAGE_THEME_RULES.get(
+            theme,
+            []
+        ):
+            if word in metadata:
+                score += 5
+
+    # -----------------------------------------------------
+    # Совпадения важных слов статьи
+    # -----------------------------------------------------
+
+    article_words = important_words(
+        article.get("title", "") + " " +
+        article.get("description", "")
+    )
+
+    for word in article_words:
+
+        if len(word) < 4:
+            continue
+
+        if word in metadata:
+            score += 2
+
+    # -----------------------------------------------------
+    # Особенно сильное совпадение с заголовком
+    # -----------------------------------------------------
+
+    title_words = important_words(
+        article.get("title", "")
+    )
+
+    for word in title_words:
+
+        if len(word) < 5:
+            continue
+
+        if word in metadata:
+            score += 4
+
+    # -----------------------------------------------------
+    # Бренды / компании
+    # -----------------------------------------------------
+
+    company_candidates = [
+        "nvidia",
+        "microsoft",
+        "google",
+        "apple",
+        "amazon",
+        "meta",
+        "openai",
+        "tesla",
+        "intel",
+        "amd",
+        "ford",
+        "toyota",
+        "volkswagen",
+        "gazprom",
+        "rosneft",
+        "sberbank",
+        "yandex",
+        "lukoil",
+        "novatek",
+        "walmart",
+        "costco"
+    ]
+
+    for company in company_candidates:
+
+        if company in article_text:
+
+            if company in metadata:
+                score += 10
+
+    # -----------------------------------------------------
+    # Плохие / технические картинки
+    # -----------------------------------------------------
+
+    for word in GENERIC_IMAGE_WORDS:
+
+        if word in metadata:
+            score -= 8
+
+    # -----------------------------------------------------
+    # Очень короткий URL
+    # -----------------------------------------------------
+
+    if len(candidate.get("url", "")) < 30:
+        score -= 2
+
+    return score
+
+
+def rank_image_candidates(
+    article,
+    candidates
+):
+    scored = []
+
+    for candidate in candidates:
+
+        score = image_candidate_score(
+            article,
+            candidate
         )
 
-        if response.status_code != 200:
+        item = dict(candidate)
+        item["score"] = score
+
+        scored.append(item)
+
+    scored.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    return scored
+
+
+# =========================================================
+# ХЭШ ИЗОБРАЖЕНИЯ
+# =========================================================
+
+def image_hash(content):
+    return hashlib.sha256(
+        content
+    ).hexdigest()
+
+
+# =========================================================
+# ЗАГРУЗКА КАРТИНКИ
+# =========================================================
+
+def download_image(url):
+    try:
+
+        r = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=25,
+            stream=True
+        )
+
+        r.raise_for_status()
+
+        content_type = (
+            r.headers.get(
+                "Content-Type",
+                ""
+            )
+            .lower()
+            .split(";")[0]
+        )
+
+        allowed_types = {
+            "image/jpeg",
+            "image/jpg",
+            "image/png"
+        }
+
+        if content_type not in allowed_types:
+            print(
+                "SKIP IMAGE TYPE:",
+                content_type,
+                url
+            )
             return None
 
-        content_type = response.headers.get(
-            "Content-Type",
-            ""
-        ).lower()
-
-        # Для надёжности Telegram используем
-        # только JPEG и PNG
-        if not any(
-            x in content_type
-            for x in [
-                "image/jpeg",
-                "image/jpg",
-                "image/png"
-            ]
-        ):
-            return None
-
-        content_length = response.headers.get(
+        content_length = r.headers.get(
             "Content-Length"
         )
 
         if content_length:
 
             try:
-
-                if (
-                    int(content_length)
-                    > MAX_IMAGE_SIZE
-                ):
+                if int(content_length) > MAX_IMAGE_SIZE:
+                    print(
+                        "SKIP IMAGE SIZE:",
+                        url
+                    )
                     return None
 
             except Exception:
                 pass
 
-        extension = ".jpg"
-
-        if "png" in content_type:
-            extension = ".png"
-
-        unique_name = hashlib.sha256(
-            (
-                image_url
-                + str(
-                    time.time()
-                )
-            ).encode(
-                "utf-8"
-            )
-        ).hexdigest()[:16]
-
-        filename = os.path.join(
-            tempfile.gettempdir(),
-            "mrk_" +
-            unique_name +
-            extension
-        )
-
+        chunks = []
         total = 0
 
-        with open(
-            filename,
-            "wb"
-        ) as f:
+        for chunk in r.iter_content(
+            chunk_size=64 * 1024
+        ):
 
-            for chunk in response.iter_content(
-                chunk_size=8192
-            ):
+            if not chunk:
+                continue
 
-                if not chunk:
-                    continue
+            total += len(chunk)
 
-                total += len(
-                    chunk
+            if total > MAX_IMAGE_SIZE:
+                print(
+                    "IMAGE TOO LARGE:",
+                    url
                 )
+                return None
 
-                if (
-                    total
-                    > MAX_IMAGE_SIZE
-                ):
+            chunks.append(chunk)
 
-                    try:
-                        os.remove(
-                            filename
-                        )
-                    except Exception:
-                        pass
+        content = b"".join(chunks)
 
-                    return None
-
-                f.write(
-                    chunk
-                )
-
-        # Слишком маленькие файлы обычно
-        # являются иконками/заглушками
-        if total < 5000:
-
-            try:
-                os.remove(
-                    filename
-                )
-            except Exception:
-                pass
-
+        if len(content) < 5000:
             return None
 
-        return filename
+        return {
+            "content": content,
+            "content_type": content_type
+        }
 
     except Exception as e:
 
         print(
-            "Download image error:",
+            "DOWNLOAD IMAGE ERROR:",
             e
         )
 
@@ -1643,208 +1646,172 @@ def download_image(
 
 
 # =========================================================
-# ПРОВЕРКА УНИКАЛЬНОСТИ ФОТО
+# ПОИСК УНИКАЛЬНОЙ ТЕМАТИЧЕСКОЙ КАРТИНКИ
 # =========================================================
 
 def find_unique_image(
     article,
     used_images
 ):
+    candidates = get_article_images(
+        article
+    )
 
-    image_candidates = (
-        get_article_images(
-            article
-        )
+    if not candidates:
+        return None
+
+    ranked = rank_image_candidates(
+        article,
+        candidates
     )
 
     print(
-        "Image candidates:",
-        len(image_candidates)
+        "IMAGE CANDIDATES:",
+        len(ranked)
     )
 
-    for index, image_url in enumerate(
-        image_candidates,
-        start=1
-    ):
+    for candidate in ranked[:15]:
 
         print(
-            f"Trying image "
-            f"{index}/"
-            f"{len(image_candidates)}"
+            "IMAGE SCORE:",
+            candidate["score"],
+            candidate["source_type"],
+            candidate["url"][:150]
         )
 
-        print(
-            image_url
+        downloaded = download_image(
+            candidate["url"]
         )
 
-        filename = download_image(
-            image_url
-        )
-
-        if not filename:
+        if not downloaded:
             continue
 
-        file_hash = image_hash(
-            filename
-        )
+        content = downloaded["content"]
 
-        if not file_hash:
+        h = image_hash(content)
 
-            try:
-                os.remove(
-                    filename
-                )
-            except Exception:
-                pass
-
-            continue
-
-        # -------------------------------------------------
-        # Фотография уже использовалась
-        # -------------------------------------------------
-
-        if file_hash in used_images:
-
+        if h in used_images:
             print(
-                "DUPLICATE IMAGE - SKIP"
+                "IMAGE ALREADY USED:",
+                h[:12]
             )
-
-            try:
-                os.remove(
-                    filename
-                )
-            except Exception:
-                pass
-
             continue
 
-        # -------------------------------------------------
-        # Новая фотография
-        # -------------------------------------------------
-
-        used_images.add(
-            file_hash
-        )
-
-        print(
-            "UNIQUE IMAGE FOUND"
-        )
-
-        return filename
-
-    print(
-        "No unique image available"
-    )
+        return {
+            "content": content,
+            "content_type": downloaded[
+                "content_type"
+            ],
+            "hash": h,
+            "url": candidate["url"],
+            "score": candidate["score"]
+        }
 
     return None
 
 
 # =========================================================
-# TELEGRAM SEND MESSAGE
+# TELEGRAM
 # =========================================================
+
+def telegram_url(method):
+    return (
+        f"https://api.telegram.org/bot"
+        f"{BOT_TOKEN}/{method}"
+    )
+
 
 def send_message(
     text,
-    url
+    reply_markup=None
 ):
-
-    endpoint = (
-        f"{TELEGRAM_API}/sendMessage"
-    )
-
-    data = {
+    payload = {
         "chat_id": CHANNEL,
         "text": text,
         "parse_mode": "HTML",
-        "reply_markup": json.dumps(
-            get_keyboard(url)
-        ),
-        "disable_web_page_preview": False
+        "disable_web_page_preview": True
     }
 
-    response = requests.post(
-        endpoint,
-        data=data,
-        timeout=30
-    )
-
-    print(
-        "sendMessage:",
-        response.status_code
-    )
-
-    try:
-        return response.json()
-    except Exception:
-        return {
-            "ok": False
-        }
-
-
-# =========================================================
-# TELEGRAM SEND PHOTO
-# =========================================================
-
-def send_photo_file(
-    filename,
-    caption,
-    url
-):
-
-    endpoint = (
-        f"{TELEGRAM_API}/sendPhoto"
-    )
-
-    try:
-
-        with open(
-            filename,
-            "rb"
-        ) as photo:
-
-            files = {
-                "photo": photo
-            }
-
-            data = {
-                "chat_id": CHANNEL,
-                "caption": caption,
-                "parse_mode": "HTML",
-                "reply_markup": json.dumps(
-                    get_keyboard(url)
-                )
-            }
-
-            response = requests.post(
-                endpoint,
-                data=data,
-                files=files,
-                timeout=60
-            )
-
-        print(
-            "sendPhoto:",
-            response.status_code
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(
+            reply_markup
         )
 
-        try:
-            return response.json()
-        except Exception:
-            return {
-                "ok": False
-            }
+    try:
+
+        r = requests.post(
+            telegram_url("sendMessage"),
+            data=payload,
+            timeout=30
+        )
+
+        print(
+            "SEND MESSAGE:",
+            r.status_code,
+            r.text[:500]
+        )
+
+        return r.ok
 
     except Exception as e:
 
         print(
-            "sendPhoto exception:",
+            "SEND MESSAGE ERROR:",
             e
         )
 
-        return {
-            "ok": False,
-            "description": str(e)
-        }
+        return False
+
+
+def send_photo_file(
+    image_data,
+    caption,
+    reply_markup=None
+):
+    files = {
+        "photo": (
+            "news.jpg",
+            image_data,
+            "image/jpeg"
+        )
+    }
+
+    data = {
+        "chat_id": CHANNEL,
+        "caption": caption,
+        "parse_mode": "HTML"
+    }
+
+    if reply_markup:
+        data["reply_markup"] = json.dumps(
+            reply_markup
+        )
+
+    try:
+
+        r = requests.post(
+            telegram_url("sendPhoto"),
+            data=data,
+            files=files,
+            timeout=60
+        )
+
+        print(
+            "SEND PHOTO:",
+            r.status_code,
+            r.text[:700]
+        )
+
+        return r.ok
+
+    except Exception as e:
+
+        print(
+            "SEND PHOTO ERROR:",
+            e
+        )
+
+        return False
 
 
 # =========================================================
@@ -1852,55 +1819,64 @@ def send_photo_file(
 # =========================================================
 
 def select_best_articles(
-    articles
+    articles,
+    posted
 ):
+    candidates = []
 
-    articles = sorted(
-        articles,
-        key=lambda x: x["score"],
+    seen_urls = set()
+
+    for article in articles:
+
+        url = article.get("url")
+
+        if not url:
+            continue
+
+        if url in posted:
+            continue
+
+        if url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+
+        age = get_age_hours(
+            article.get("date")
+        )
+
+        if age > MAX_NEWS_AGE_HOURS:
+            continue
+
+        score = calculate_score(
+            article
+        )
+
+        if score < MIN_SCORE:
+            continue
+
+        article["score"] = score
+        article["category"] = detect_category(
+            article
+        )
+
+        candidates.append(article)
+
+    candidates.sort(
+        key=lambda x: (
+            x.get("score", 0),
+            -get_age_hours(
+                x.get("date")
+            )
+        ),
         reverse=True
     )
 
-    selected = []
-    categories_used = set()
+    candidates = remove_similar_news(
+        candidates
+    )
 
-    # Первый проход:
-    # разные категории
-    for article in articles:
-
-        if len(selected) >= MAX_POSTS_PER_RUN:
-            break
-
-        category = article[
-            "category"
-        ]
-
-        if category not in categories_used:
-
-            selected.append(
-                article
-            )
-
-            categories_used.add(
-                category
-            )
-
-    # Второй проход:
-    # если не набрали лимит
-    if len(selected) < MAX_POSTS_PER_RUN:
-
-        for article in articles:
-
-            if len(selected) >= MAX_POSTS_PER_RUN:
-                break
-
-            if article not in selected:
-
-                selected.append(
-                    article
-                )
-
-    return selected
+    return candidates[:MAX_CANDIDATES]
 
 
 # =========================================================
@@ -1910,340 +1886,211 @@ def select_best_articles(
 def main():
 
     if not BOT_TOKEN:
-
-        print(
-            "ERROR: BOT_TOKEN is missing"
+        raise RuntimeError(
+            "BOT_TOKEN is not configured"
         )
 
-        return
-
-    print(
-        "======================================"
-    )
-
-    print(
-        "МРК BUSINESS NEWS BOT 5.0"
-    )
-
-    print(
-        "======================================"
-    )
+    print("=" * 60)
+    print("МРК BUSINESS NEWS BOT v5.1")
+    print("=" * 60)
 
     posted = load_posted()
-
     used_images = load_used_images()
 
-    all_articles = []
-
-    # -----------------------------------------------------
-    # ЗАГРУЗКА RSS
-    # -----------------------------------------------------
-
-    for source_name, feed_url in FEEDS:
-
-        print(
-            "Loading:",
-            source_name
-        )
-
-        articles = get_google_news_rss(
-            source_name,
-            feed_url
-        )
-
-        all_articles.extend(
-            articles
-        )
-
     print(
-        "Total RSS articles:",
-        len(all_articles)
-    )
-
-    # -----------------------------------------------------
-    # ОБРАБОТКА
-    # -----------------------------------------------------
-
-    candidates = []
-
-    for article in all_articles:
-
-        # Уже публиковали
-        if article["link"] in posted:
-            continue
-
-        # Слишком старая
-        age = get_age_hours(
-            article["date"]
-        )
-
-        if (
-            age is not None
-            and age > MAX_NEWS_AGE_HOURS
-        ):
-            continue
-
-        # Категория
-        article["category"] = (
-            detect_category(
-                article
-            )
-        )
-
-        # Рейтинг
-        article["score"] = (
-            calculate_score(
-                article
-            )
-        )
-
-        # Кликбейт
-        article["score"] -= (
-            clickbait_penalty(
-                article
-            )
-        )
-
-        article["score"] = round(
-            max(
-                article["score"],
-                0
-            ),
-            1
-        )
-
-        if (
-            article["score"]
-            < MIN_SCORE
-        ):
-            continue
-
-        candidates.append(
-            article
-        )
-
-    print(
-        "Candidates:",
-        len(candidates)
-    )
-
-    # -----------------------------------------------------
-    # УБИРАЕМ ПОХОЖИЕ НОВОСТИ
-    # -----------------------------------------------------
-
-    candidates = (
-        remove_similar_news(
-            candidates
-        )
-    )
-
-    # -----------------------------------------------------
-    # ОГРАНИЧЕНИЕ
-    # -----------------------------------------------------
-
-    candidates = sorted(
-        candidates,
-        key=lambda x: x["score"],
-        reverse=True
-    )[:MAX_CANDIDATES]
-
-    # -----------------------------------------------------
-    # ЛУЧШИЕ
-    # -----------------------------------------------------
-
-    selected = (
-        select_best_articles(
-            candidates
-        )
-    )
-
-    print(
-        "Selected:",
-        len(selected)
-    )
-
-    # -----------------------------------------------------
-    # ПУБЛИКАЦИЯ
-    # -----------------------------------------------------
-
-    for article in selected:
-
-        print()
-        print(
-            "--------------------------------------"
-        )
-
-        print(
-            "Publishing:",
-            article["title"]
-        )
-
-        print(
-            "Category:",
-            article["category"]
-        )
-
-        print(
-            "Score:",
-            article["score"]
-        )
-
-        print(
-            "Source:",
-            article["source"]
-        )
-
-        caption = format_post(
-            article
-        )
-
-        image_file = None
-
-        try:
-
-            # -------------------------------------------------
-            # ИЩЕМ УНИКАЛЬНОЕ ФОТО
-            # -------------------------------------------------
-
-            image_file = find_unique_image(
-                article,
-                used_images
-            )
-
-            # -------------------------------------------------
-            # ОТПРАВКА С ФОТО
-            # -------------------------------------------------
-
-            if image_file:
-
-                result = send_photo_file(
-                    image_file,
-                    caption,
-                    article["link"]
-                )
-
-                # Если Telegram не принял
-                # фотографию — отправляем текст
-                if not result.get("ok"):
-
-                    print(
-                        "Photo failed."
-                    )
-
-                    print(
-                        "Sending text."
-                    )
-
-                    text_result = send_message(
-                        caption,
-                        article["link"]
-                    )
-
-                    if not text_result.get(
-                        "ok"
-                    ):
-
-                        print(
-                            "TEXT SEND FAILED"
-                        )
-
-                        # Если пост вообще не ушёл,
-                        # возвращаем хэш фотографии
-                        # из истории
-                        file_hash = image_hash(
-                            image_file
-                        )
-
-                        if file_hash:
-                            used_images.discard(
-                                file_hash
-                            )
-
-                        continue
-
-            else:
-
-                # -------------------------------------------------
-                # БЕЗ ФОТО
-                # -------------------------------------------------
-
-                result = send_message(
-                    caption,
-                    article["link"]
-                )
-
-                if not result.get("ok"):
-
-                    print(
-                        "MESSAGE SEND FAILED"
-                    )
-
-                    continue
-
-            # -------------------------------------------------
-            # УСПЕШНАЯ ПУБЛИКАЦИЯ
-            # -------------------------------------------------
-
-            posted.add(
-                article["link"]
-            )
-
-            print(
-                "PUBLISHED SUCCESSFULLY"
-            )
-
-        except Exception as e:
-
-            print(
-                "Publishing error:",
-                e
-            )
-
-        finally:
-
-            if image_file:
-
-                try:
-                    os.remove(
-                        image_file
-                    )
-                except Exception:
-                    pass
-
-    # -----------------------------------------------------
-    # СОХРАНЕНИЕ ИСТОРИИ
-    # -----------------------------------------------------
-
-    save_posted(
-        posted
-    )
-
-    save_used_images(
-        used_images
-    )
-
-    print()
-
-    print(
-        "======================================"
-    )
-
-    print(
-        "BOT 5.0 FINISHED"
-    )
-
-    print(
-        "Posted total:",
+        "Posted:",
         len(posted)
     )
 
     print(
-        "Used unique images:",
+        "Used images:",
         len(used_images)
     )
 
+    all_articles = []
+
+    # -----------------------------------------------------
+    # RSS
+    # -----------------------------------------------------
+
+    for feed_name, feed_url in RSS_FEEDS:
+
+        print(
+            "\nRSS:",
+            feed_name
+        )
+
+        xml = get_google_news_rss(
+            feed_url
+        )
+
+        parsed = parse_rss(
+            xml,
+            feed_name
+        )
+
+        print(
+            "Found:",
+            len(parsed)
+        )
+
+        all_articles.extend(
+            parsed
+        )
+
     print(
-        "======================================")
+        "\nTOTAL ARTICLES:",
+        len(all_articles)
+    )
+
+    # -----------------------------------------------------
+    # Отбор
+    # -----------------------------------------------------
+
+    selected = select_best_articles(
+        all_articles,
+        posted
+    )
+
+    print(
+        "SELECTED:",
+        len(selected)
+    )
+
+    # -----------------------------------------------------
+    # Публикация
+    # -----------------------------------------------------
+
+    published_count = 0
+
+    for article in selected:
+
+        if published_count >= MAX_POSTS_PER_RUN:
+            break
+
+        print("\n" + "=" * 60)
+
+        print(
+            "TITLE:",
+            article.get("title")
+        )
+
+        print(
+            "SCORE:",
+            article.get("score")
+        )
+
+        print(
+            "CATEGORY:",
+            article.get("category")
+        )
+
+        # -------------------------------------------------
+        # Формируем текст
+        # -------------------------------------------------
+
+        post_text = format_post(
+            article
+        )
+
+        keyboard = get_keyboard(
+            article
+        )
+
+        # -------------------------------------------------
+        # Пытаемся найти тематическое фото
+        # -------------------------------------------------
+
+        image = find_unique_image(
+            article,
+            used_images
+        )
+
+        success = False
+
+        if image:
+
+            print(
+                "SELECTED IMAGE SCORE:",
+                image["score"]
+            )
+
+            success = send_photo_file(
+                image["content"],
+                post_text,
+                keyboard
+            )
+
+            if success:
+
+                used_images.append(
+                    image["hash"]
+                )
+
+                save_used_images(
+                    used_images
+                )
+
+                print(
+                    "IMAGE SAVED:",
+                    image["hash"][:16]
+                )
+
+        # -------------------------------------------------
+        # Если фото не получилось — текст
+        # -------------------------------------------------
+
+        if not success:
+
+            print(
+                "Sending text fallback..."
+            )
+
+            success = send_message(
+                post_text,
+                keyboard
+            )
+
+        # -------------------------------------------------
+        # История
+        # -------------------------------------------------
+
+        if success:
+
+            url = article.get("url")
+
+            if url and url not in posted:
+                posted.append(url)
+
+            save_posted(posted)
+
+            published_count += 1
+
+            print(
+                "PUBLISHED:",
+                published_count
+            )
+
+            time.sleep(3)
+
+        else:
+
+            print(
+                "FAILED TO PUBLISH:"
+            )
+
+            print(
+                article.get("url")
+            )
+
+    print("\n" + "=" * 60)
+
+    print(
+        "DONE. Published:",
+        published_count
+    )
+
+    print("=" * 60)
 
 
 if __name__ == "__main__":
