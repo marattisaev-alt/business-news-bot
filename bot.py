@@ -13,8 +13,14 @@ POSTED_FILE = "posted.json"
 def load_posted():
     try:
         with open(POSTED_FILE, "r", encoding="utf-8") as file:
-            return set(json.load(file))
-    except FileNotFoundError:
+            data = json.load(file)
+
+        if not isinstance(data, list):
+            return set()
+
+        return set(data)
+
+    except (FileNotFoundError, json.JSONDecodeError):
         return set()
 
 
