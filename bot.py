@@ -12,25 +12,43 @@ POSTED_FILE = "posted.json"
 
 def load_posted():
     try:
+        if not os.path.exists(POSTED_FILE):
+            return set()
+
         with open(POSTED_FILE, "r", encoding="utf-8") as file:
-            data = json.load(file)
+            content = file.read().strip()
+
+        if not content:
+            return set()
+
+        data = json.loads(content)
 
         if not isinstance(data, list):
             return set()
 
         return set(data)
 
-    except (FileNotFoundError, json.JSONDecodeError):
+    except Exception as error:
+        print(f"Не удалось прочитать posted.json: {error}")
         return set()
 
 
 def save_posted(posted):
     with open(POSTED_FILE, "w", encoding="utf-8") as file:
-        json.dump(list(posted), file, ensure_ascii=False, indent=2)
+        json.dump(
+            list(posted),
+            file,
+            ensure_ascii=False,
+            indent=2
+        )
 
 
 def get_news():
-    response = requests.get(RSS_URL, timeout=20)
+    response = requests.get(
+        RSS_URL,
+        timeout=20
+    )
+
     response.raise_for_status()
 
     root = ET.fromstring(response.content)
@@ -43,8 +61,8 @@ def get_news():
 
         if title and link:
             news.append({
-                "title": title,
-                "link": link
+                "title": title.strip(),
+                "link": link.strip()
             })
 
     return news
@@ -66,29 +84,35 @@ def send_message(text):
     response.raise_for_status()
 
 
-posted = load_posted()
-news = get_news()
+def main():
+    posted = load_posted()
+    news = get_news()
 
-new_posts = []
+    new_posts = []
 
-for article in news:
-    if article["link"] not in posted:
-        new_posts.append(article)
+    for article in news:
+        if article["link"] not in posted:
+            new_posts.append(article)
 
-# Не публикуем больше 3 новостей за один запуск
-new_posts = new_posts[:3]
+    new_posts = new_posts[:3]
 
-for article in new_posts:
-    text = (
-        "📰 БИЗНЕС НОВОСТИ\n\n"
-        f"🔹 {article['title']}\n\n"
-        f"🔗 Источник:\n{article['link']}"
-    )
+    for article in new_posts:
+        text = (
+            "📰 БИЗНЕС НОВОСТИ\n\n"
+            f"🔹 {article['title']}\n\n"
+            f"🔗 Источник:\n{article['link']}"
+        )
 
-    send_message(text)
+        send_message(text)
 
-    posted.add(article["link"])
+        posted.add(article["link"])
 
-save_posted(posted)
+        print(f"Опубликовано: {article['title']}")
 
-print(f"Опубликовано новых новостей: {len(new_posts)}")
+    save_posted(posted)
+
+    print(f"Всего опубликовано: {len(new_posts)}")
+
+
+if __name__ == "__main__":
+    main()
