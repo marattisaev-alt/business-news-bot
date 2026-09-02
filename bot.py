@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 import xml.etree.ElementTree as ET
 
@@ -6,6 +7,21 @@ TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL = os.getenv("CHANNEL")
 
 RSS_URL = "https://news.google.com/rss/search?q=business&hl=en-US&gl=US&ceid=US:en"
+POSTED_FILE = "posted.json"
+
+
+def load_posted():
+    try:
+        with open(POSTED_FILE, "r", encoding="utf-8") as file:
+            return set(json.load(file))
+    except FileNotFoundError:
+        return set()
+
+
+def save_posted(posted):
+    with open(POSTED_FILE, "w", encoding="utf-8") as file:
+        json.dump(list(posted), file, ensure_ascii=False, indent=2)
+
 
 def get_news():
     response = requests.get(RSS_URL, timeout=20)
@@ -15,7 +31,7 @@ def get_news():
 
     news = []
 
-    for item in root.findall(".//item")[:5]:
+    for item in root.findall(".//item"):
         title = item.findtext("title")
         link = item.findtext("link")
 
@@ -44,19 +60,29 @@ def send_message(text):
     response.raise_for_status()
 
 
+posted = load_posted()
 news = get_news()
 
-if news:
-    article = news[0]
+new_posts = []
 
+for article in news:
+    if article["link"] not in posted:
+        new_posts.append(article)
+
+# Не публикуем больше 3 новостей за один запуск
+new_posts = new_posts[:3]
+
+for article in new_posts:
     text = (
         "📰 БИЗНЕС НОВОСТИ\n\n"
         f"🔹 {article['title']}\n\n"
-        f"🔗 Читать источник:\n{article['link']}"
+        f"🔗 Источник:\n{article['link']}"
     )
 
     send_message(text)
 
-    print("Новость опубликована:", article["title"])
-else:
-    print("Новых новостей не найдено")
+    posted.add(article["link"])
+
+save_posted(posted)
+
+print(f"Опубликовано новых новостей: {len(new_posts)}")
