@@ -6,14 +6,14 @@ import hashlib
 import html
 import statistics
 from datetime import datetime, timezone
-from urllib.parse import urljoin, quote_plus
+from urllib.parse import quote_plus
 
 import requests
 import xml.etree.ElementTree as ET
 
 
 # =========================================================
-# МРК BUSINESS NEWS BOT 6.0
+# НАСТРОЙКИ
 # =========================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -23,61 +23,66 @@ MAX_POSTS_PER_RUN = 2
 MIN_SCORE = 9
 MAX_CANDIDATES = 70
 MAX_NEWS_AGE_HOURS = 48
+
 MAX_IMAGE_SIZE = 9 * 1024 * 1024
 
 POSTED_FILE = "posted.json"
 USED_IMAGES_FILE = "used_images.json"
 
 HEADERS = {
-    "User-Agent":
+    "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9"
+        "AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+    )
 }
 
 
 # =========================================================
-# RSS
+# RSS-ИСТОЧНИКИ
 # =========================================================
 
 RSS_FEEDS = [
     (
         "Reuters",
         "https://news.google.com/rss/search?q="
-        "business+when:2d&hl=en-US&gl=US&ceid=US:en"
+        + quote_plus("business when:2d")
+        + "&hl=en-US&gl=US&ceid=US:en",
     ),
     (
-        "USA",
+        "USA Business",
         "https://news.google.com/rss/search?q="
-        "US+business+economy+when:2d&hl=en-US&gl=US&ceid=US:en"
+        + quote_plus("USA business economy when:2d")
+        + "&hl=en-US&gl=US&ceid=US:en",
     ),
     (
-        "Russia",
+        "Russia Business",
         "https://news.google.com/rss/search?q="
-        "Russia+business+economy+when:2d&hl=en-US&gl=US&ceid=US:en"
+        + quote_plus("Russia business economy when:2d")
+        + "&hl=en-US&gl=US&ceid=US:en",
     ),
     (
         "Markets",
         "https://news.google.com/rss/search?q="
-        "stock+market+finance+when:2d&hl=en-US&gl=US&ceid=US:en"
+        + quote_plus("stock market finance markets when:2d")
+        + "&hl=en-US&gl=US&ceid=US:en",
     ),
     (
         "Economy",
         "https://news.google.com/rss/search?q="
-        "economy+inflation+interest+rates+when:2d"
-        "&hl=en-US&gl=US&ceid=US:en"
+        + quote_plus("inflation interest rates economy when:2d")
+        + "&hl=en-US&gl=US&ceid=US:en",
     ),
     (
         "Technology",
         "https://news.google.com/rss/search?q="
-        "technology+AI+chips+business+when:2d"
-        "&hl=en-US&gl=US&ceid=US:en"
+        + quote_plus("AI chips technology business when:2d")
+        + "&hl=en-US&gl=US&ceid=US:en",
     ),
     (
-        "Business",
+        "Companies",
         "https://news.google.com/rss/search?q="
-        "companies+corporate+business+when:2d"
-        "&hl=en-US&gl=US&ceid=US:en"
+        + quote_plus("companies corporate business when:2d")
+        + "&hl=en-US&gl=US&ceid=US:en",
     ),
 ]
 
@@ -87,109 +92,156 @@ RSS_FEEDS = [
 # =========================================================
 
 CRITICAL_WORDS = [
-    "bankruptcy", "bankrupt", "collapse", "crisis",
-    "default", "war", "emergency", "fraud",
-    "investigation", "lawsuit", "sanctions",
-    "sanction", "tariff", "tariffs",
-    "ban", "banned", "recall"
+    "bankruptcy",
+    "collapse",
+    "crisis",
+    "default",
+    "war",
+    "emergency",
+    "fraud",
+    "investigation",
+    "lawsuit",
+    "sanctions",
+    "tariff",
+    "ban",
+    "recall",
 ]
 
 MONEY_WORDS = [
-    "million", "billion", "trillion",
-    "revenue", "profit", "loss",
-    "earnings", "valuation",
-    "investment", "funding",
-    "deal", "acquisition",
-    "merger", "debt"
+    "million",
+    "billion",
+    "trillion",
+    "revenue",
+    "profit",
+    "loss",
+    "earnings",
+    "valuation",
+    "investment",
+    "funding",
+    "deal",
+    "acquisition",
+    "merger",
+    "debt",
 ]
 
 FINANCE_WORDS = [
-    "bank", "banks", "banking",
-    "fed", "federal reserve",
-    "ecb", "central bank",
-    "interest rate", "interest rates",
-    "inflation", "deflation",
-    "currency", "dollar", "euro",
-    "bond", "bonds", "credit",
-    "loan", "finance", "financial"
+    "bank",
+    "fed",
+    "ecb",
+    "central bank",
+    "rates",
+    "inflation",
+    "currency",
+    "dollar",
+    "euro",
+    "bond",
+    "credit",
+    "loan",
+    "finance",
 ]
 
 TECH_WORDS = [
-    "ai", "artificial intelligence",
-    "technology", "software",
-    "chip", "chips",
-    "semiconductor", "semiconductors",
-    "data center", "data centre",
-    "cloud", "robot", "robotics",
-    "automation",
-    "nvidia", "microsoft",
-    "google", "openai",
-    "apple", "meta",
-    "amazon", "intel", "amd"
+    "ai",
+    "artificial intelligence",
+    "technology",
+    "software",
+    "chip",
+    "semiconductor",
+    "data center",
+    "cloud",
+    "robot",
+    "nvidia",
+    "microsoft",
+    "google",
+    "openai",
+    "apple",
+    "meta",
+    "amazon",
+    "intel",
+    "amd",
 ]
 
 MARKET_WORDS = [
-    "stock", "stocks",
-    "stock market",
-    "shares", "share price",
-    "trading", "trader",
-    "exchange", "wall street",
-    "nasdaq", "dow jones",
-    "s&p", "rally",
-    "surge", "jump",
-    "gain", "rise",
-    "drop", "fall",
-    "fell", "plunge",
-    "decline", "selloff",
-    "sell-off",
+    "stock",
+    "stocks",
+    "shares",
+    "trading",
+    "exchange",
+    "wall street",
+    "nasdaq",
+    "dow jones",
+    "s&p",
+    "rally",
+    "surge",
+    "jump",
+    "gain",
+    "rise",
+    "drop",
+    "fall",
+    "plunge",
+    "decline",
+    "selloff",
     "record high",
-    "record low"
+    "record low",
 ]
 
 MACRO_WORDS = [
-    "economy", "economic",
-    "inflation", "gdp",
-    "employment", "jobs",
+    "economy",
+    "inflation",
+    "gdp",
+    "employment",
     "unemployment",
-    "recession", "growth",
-    "trade", "tariff",
-    "rate cut", "rate hike"
+    "recession",
+    "growth",
+    "trade",
+    "tariff",
+    "rate cut",
+    "rate hike",
 ]
 
 USA_WORDS = [
-    "usa", "u.s.",
+    "usa",
     "united states",
-    "washington", "new york",
-    "american", "america",
-    "california", "texas",
-    "wall street"
+    "america",
+    "american",
+    "washington",
+    "new york",
+    "california",
 ]
 
 RUSSIA_WORDS = [
-    "russia", "russian",
+    "russia",
+    "russian",
     "moscow",
-    "gazprom", "rosneft",
-    "sberbank", "yandex",
-    "lukoil", "novatek",
-    "vtb", "ozon",
-    "wildberries"
+    "rubles",
+    "ruble",
+    "sberbank",
+    "gazprom",
+    "rosneft",
+    "lukoil",
+    "yandex",
 ]
 
 LOW_VALUE_WORDS = [
-    "horoscope", "celebrity",
-    "movie", "football",
-    "soccer", "recipe",
-    "lottery", "entertainment"
+    "celebrity",
+    "entertainment",
+    "movie",
+    "music",
+    "sports",
+    "football",
+    "soccer",
+    "match",
+    "game",
 ]
 
 CLICKBAIT_WORDS = [
     "you won't believe",
     "shocking",
     "unbelievable",
-    "secret",
+    "this is why",
     "what happens next",
     "must see",
-    "click here"
+    "secret",
 ]
 
 
@@ -223,7 +275,7 @@ COMPANIES = {
     "gazprom": None,
     "rosneft": None,
     "lukoil": None,
-    "yandex": None
+    "yandex": None,
 }
 
 
@@ -232,302 +284,317 @@ COMPANIES = {
 # =========================================================
 
 IMAGE_THEMES = {
-    "technology": [
-        "ai", "artificial intelligence",
-        "chip", "chips", "semiconductor",
-        "nvidia", "microsoft", "google",
-        "openai", "apple", "meta",
-        "data center", "software",
-        "robot", "robotics"
-    ],
-
-    "auto": [
-        "tesla", "car", "cars",
-        "automotive", "vehicle",
-        "electric vehicle", "ev",
-        "ford", "toyota",
-        "volkswagen", "bmw",
-        "mercedes"
-    ],
-
-    "energy": [
-        "oil", "gas", "energy",
-        "opec", "crude",
-        "refinery", "pipeline",
-        "lng", "petroleum",
-        "electricity"
-    ],
-
     "markets": [
-        "stock", "stocks",
-        "stock market",
-        "trading", "trader",
-        "exchange", "wall street",
-        "nasdaq", "dow jones",
-        "s&p", "shares"
+        "stock",
+        "stocks",
+        "market",
+        "exchange",
+        "trading",
+        "wall street",
+        "nasdaq",
+        "dow",
+        "shares",
     ],
-
+    "technology": [
+        "ai",
+        "artificial intelligence",
+        "technology",
+        "chip",
+        "semiconductor",
+        "computer",
+        "robot",
+        "data center",
+        "cloud",
+    ],
     "finance": [
-        "bank", "banks",
-        "banking", "fed",
-        "federal reserve",
-        "ecb", "central bank",
-        "dollar", "euro",
-        "currency", "finance"
+        "bank",
+        "finance",
+        "money",
+        "dollar",
+        "euro",
+        "credit",
+        "loan",
+        "interest rate",
     ],
-
-    "russia": [
-        "russia", "russian",
-        "moscow", "gazprom",
-        "rosneft", "sberbank",
-        "yandex", "lukoil",
-        "novatek"
-    ]
+    "companies": [
+        "company",
+        "corporate",
+        "business",
+        "ceo",
+        "office",
+        "factory",
+    ],
+    "economy": [
+        "economy",
+        "inflation",
+        "gdp",
+        "employment",
+        "trade",
+    ],
 }
-
-GENERIC_IMAGE_WORDS = [
-    "logo", "icon", "avatar",
-    "favicon", "sprite",
-    "placeholder", "default",
-    "no-image", "no_image",
-    "thumbnail", "thumb",
-    "banner", "advertisement",
-    "pixel"
-]
 
 
 # =========================================================
-# UTILS
+# БАЗОВЫЕ ФУНКЦИИ
 # =========================================================
 
 def clean_text(text):
     if not text:
         return ""
 
-    text = re.sub(r"<[^>]+>", " ", text)
     text = html.unescape(text)
+    text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
 
 
 def normalize(text):
-    text = clean_text(text).lower()
-    text = re.sub(r"[^\w\s\-.]", " ", text)
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
+    return clean_text(text).lower()
 
 
 def escape_html(text):
-    return html.escape(text or "", quote=False)
+    return html.escape(str(text), quote=False)
 
 
-def shorten(text, limit):
+def shorten(text, max_len=450):
     text = clean_text(text)
 
-    if len(text) <= limit:
+    if len(text) <= max_len:
         return text
 
-    return text[:limit - 3].rstrip() + "..."
+    return text[:max_len].rsplit(" ", 1)[0] + "…"
 
 
 # =========================================================
-# FILE HISTORY
+# ИСТОРИЯ
 # =========================================================
 
 def load_json_file(filename, default):
-    if not os.path.exists(filename):
-        return default
-
     try:
         with open(filename, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         return data
-
     except Exception:
         return default
 
 
-def save_json_file(filename, data, limit=2000):
-    if isinstance(data, list):
-        data = data[-limit:]
-
+def save_json_file(filename, data):
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(
-            data,
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def load_posted():
-    data = load_json_file(
-        POSTED_FILE,
-        []
-    )
+    data = load_json_file(POSTED_FILE, [])
 
-    return data if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+
+    return data
+
+
+def save_posted(data):
+    save_json_file(POSTED_FILE, data[-1000:])
 
 
 def load_used_images():
-    data = load_json_file(
-        USED_IMAGES_FILE,
-        []
-    )
+    data = load_json_file(USED_IMAGES_FILE, [])
 
-    return data if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+
+    return data
+
+
+def save_used_images(data):
+    save_json_file(USED_IMAGES_FILE, data[-1000:])
 
 
 # =========================================================
-# DATE
+# ДАТЫ
 # =========================================================
 
 def parse_date(value):
     if not value:
         return None
 
-    formats = [
-        "%a, %d %b %Y %H:%M:%S %Z",
-        "%a, %d %b %Y %H:%M:%S %z",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%d %H:%M:%S"
-    ]
+    try:
+        from email.utils import parsedate_to_datetime
 
-    for fmt in formats:
-        try:
-            dt = datetime.strptime(
-                value.strip(),
-                fmt
-            )
+        dt = parsedate_to_datetime(value)
 
-            if dt.tzinfo is None:
-                dt = dt.replace(
-                    tzinfo=timezone.utc
-                )
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
 
-            return dt
+        return dt.astimezone(timezone.utc)
 
-        except Exception:
-            pass
-
-    return None
+    except Exception:
+        return None
 
 
-def age_hours(dt):
+def age_hours(value):
+    dt = parse_date(value)
+
     if not dt:
-        return 0
+        return 999
 
-    if dt.tzinfo is None:
-        dt = dt.replace(
-            tzinfo=timezone.utc
+    now = datetime.now(timezone.utc)
+
+    return max(0, (now - dt).total_seconds() / 3600)
+
+
+# =========================================================
+# HTTP
+# =========================================================
+
+def fetch(url, timeout=20):
+    try:
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=timeout,
         )
 
-    return max(
-        0,
-        (
-            datetime.now(timezone.utc) - dt
-        ).total_seconds() / 3600
-    )
+        response.raise_for_status()
+
+        return response
+
+    except Exception:
+        return None
 
 
 # =========================================================
 # RSS
 # =========================================================
 
-def fetch(url):
-    try:
-        r = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=25
-        )
-
-        r.raise_for_status()
-
-        return r.text
-
-    except Exception as e:
-        print("FETCH ERROR:", e)
-        return ""
-
-
-def parse_rss(xml_text, feed_name):
+def parse_rss(xml_text, source):
     articles = []
-
-    if not xml_text:
-        return articles
 
     try:
         root = ET.fromstring(xml_text)
 
-    except Exception as e:
-        print("XML ERROR:", e)
+    except Exception:
         return articles
 
     for item in root.findall(".//item"):
+        title = item.findtext("title", "")
+        description = item.findtext("description", "")
+        link = item.findtext("link", "")
+        pub_date = item.findtext("pubDate", "")
 
-        title = clean_text(
-            item.findtext("title", "")
-        )
-
-        link = clean_text(
-            item.findtext("link", "")
-        )
-
-        description = clean_text(
-            item.findtext(
-                "description",
-                ""
-            )
-        )
-
-        pub_date = clean_text(
-            item.findtext(
-                "pubDate",
-                ""
-            )
-        )
-
-        source = clean_text(
-            item.findtext(
-                "{http://search.yahoo.com/mrss/}source",
-                ""
-            )
-        )
-
-        if not source:
-            source = feed_name
+        title = clean_text(title)
+        description = clean_text(description)
+        link = clean_text(link)
 
         if not title or not link:
             continue
 
-        articles.append({
-            "title": title,
-            "description": description,
-            "url": link,
-            "source": source,
-            "feed": feed_name,
-            "date": parse_date(pub_date)
-        })
+        articles.append(
+            {
+                "title": title,
+                "description": description,
+                "link": link,
+                "published": pub_date,
+                "source": source,
+            }
+        )
 
     return articles
 
 
 # =========================================================
-# KEYWORDS
+# ПЕРЕВОД НА РУССКИЙ
+# =========================================================
+
+def is_mostly_russian(text):
+    text = clean_text(text)
+
+    if not text:
+        return False
+
+    cyrillic = len(re.findall(r"[а-яё]", text.lower()))
+    latin = len(re.findall(r"[a-z]", text.lower()))
+
+    if cyrillic == 0:
+        return False
+
+    if latin == 0:
+        return True
+
+    return cyrillic >= latin * 1.2
+
+
+def translate_text(text):
+    """
+    Перевод английского текста на русский через MyMemory.
+    Если перевод не удался — возвращается оригинал.
+    """
+
+    text = clean_text(text)
+
+    if not text:
+        return ""
+
+    # Уже русский — не переводим
+    if is_mostly_russian(text):
+        return text
+
+    try:
+        response = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={
+                "q": text[:4500],
+                "langpair": "en|ru",
+            },
+            headers=HEADERS,
+            timeout=20,
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        translated = (
+            data.get("responseData", {})
+            .get("translatedText", "")
+        )
+
+        translated = clean_text(translated)
+
+        # Проверяем, что перевод действительно получился
+        if translated and is_mostly_russian(translated):
+            return translated
+
+    except Exception as e:
+        print("Translation error:", e)
+
+    return text
+
+
+def prepare_russian_article(article):
+    """
+    Переводим заголовок и описание один раз,
+    чтобы не делать повторные запросы.
+    """
+
+    original_title = article.get("title", "")
+    original_description = article.get("description", "")
+
+    article["ru_title"] = translate_text(original_title)
+    article["ru_description"] = translate_text(original_description)
+
+    return article
+
+
+# =========================================================
+# АНАЛИЗ
 # =========================================================
 
 def contains_any(text, words):
     text = normalize(text)
 
-    return any(
-        word in text
-        for word in words
-    )
+    return any(word in text for word in words)
 
 
 def extract_numbers(text):
@@ -537,325 +604,216 @@ def extract_numbers(text):
         r"\$[\d,.]+\s*(?:million|billion|trillion)?",
         r"€[\d,.]+\s*(?:million|billion|trillion)?",
         r"£[\d,.]+\s*(?:million|billion|trillion)?",
-        r"\b\d+(?:\.\d+)?%\b",
-        r"\b\d+(?:\.\d+)?\s*(?:million|billion|trillion)\b"
+        r"\b\d+(?:\.\d+)?%",
+        r"\b\d+(?:\.\d+)?\s*(?:million|billion|trillion)\b",
     ]
 
-    found = []
+    results = []
 
     for pattern in patterns:
-        for value in re.findall(
-            pattern,
-            text,
-            flags=re.IGNORECASE
-        ):
-            value = value.strip()
+        found = re.findall(pattern, text, flags=re.I)
 
-            if value not in found:
-                found.append(value)
+        for item in found:
+            item = item.strip()
 
-    return found[:6]
+            if item not in results:
+                results.append(item)
+
+    return results[:8]
 
 
-def detect_companies(article):
-    text = normalize(
-        article.get("title", "") +
-        " " +
-        article.get("description", "")
-    )
+def detect_companies(text):
+    text = normalize(text)
 
     found = []
 
     for company in COMPANIES:
-
         if company in text:
             found.append(company)
 
-    return found[:5]
+    return found
 
-
-# =========================================================
-# CATEGORY
-# =========================================================
 
 def detect_category(article):
     text = normalize(
-        article.get("title", "") +
-        " " +
-        article.get("description", "")
+        article.get("title", "")
+        + " "
+        + article.get("description", "")
     )
 
-    scores = {
-        "Технологии": 0,
-        "Рынки": 0,
-        "Финансы": 0,
-        "Энергетика": 0,
-        "Россия": 0,
-        "США": 0,
-        "Экономика": 0,
-        "Бизнес": 0
-    }
+    if contains_any(text, TECH_WORDS):
+        return "Технологии"
 
-    for word in TECH_WORDS:
-        if word in text:
-            scores["Технологии"] += 3
+    if contains_any(text, MARKET_WORDS):
+        return "Рынки"
 
-    for word in MARKET_WORDS:
-        if word in text:
-            scores["Рынки"] += 3
+    if contains_any(text, FINANCE_WORDS):
+        return "Финансы"
 
-    for word in FINANCE_WORDS:
-        if word in text:
-            scores["Финансы"] += 3
+    if contains_any(text, MACRO_WORDS):
+        return "Экономика"
 
-    for word in USA_WORDS:
-        if word in text:
-            scores["США"] += 2
+    if contains_any(text, RUSSIA_WORDS):
+        return "Россия"
 
-    for word in RUSSIA_WORDS:
-        if word in text:
-            scores["Россия"] += 3
+    if contains_any(text, USA_WORDS):
+        return "США"
 
-    for word in MACRO_WORDS:
-        if word in text:
-            scores["Экономика"] += 3
-
-    if contains_any(
-        text,
-        [
-            "oil", "gas", "energy",
-            "opec", "crude",
-            "refinery", "pipeline"
-        ]
-    ):
-        scores["Энергетика"] += 6
-
-    category = max(
-        scores,
-        key=scores.get
-    )
-
-    if scores[category] == 0:
-        return "Бизнес"
-
-    return category
+    return "Бизнес"
 
 
 # =========================================================
-# SOURCE QUALITY
+# ОЦЕНКА НОВОСТИ
 # =========================================================
-
-SOURCE_WEIGHTS = {
-    "reuters": 10,
-    "bloomberg": 10,
-    "financial times": 9,
-    "wall street journal": 9,
-    "cnbc": 8,
-    "associated press": 8,
-    "ap news": 8,
-    "bbc": 7,
-    "cnn": 6,
-    "forbes": 7,
-    "marketwatch": 7,
-    "yahoo finance": 7,
-    "business insider": 6,
-    "tass": 6,
-    "interfax": 6,
-    "ria": 5
-}
-
 
 def source_score(source):
     source = normalize(source)
 
-    for name, score in SOURCE_WEIGHTS.items():
+    if "reuters" in source:
+        return 8
 
-        if name in source:
-            return score
+    if "market" in source:
+        return 5
 
-    return 3
+    if "economy" in source:
+        return 5
 
+    if "technology" in source:
+        return 5
 
-# =========================================================
-# NEWS IMPORTANCE
-# =========================================================
+    if "business" in source:
+        return 4
+
+    return 2
+
 
 def clickbait_penalty(text):
-    penalty = 0
+    text = normalize(text)
 
-    for word in CLICKBAIT_WORDS:
-        if word in text:
-            penalty += 4
+    count = sum(1 for word in CLICKBAIT_WORDS if word in text)
 
-    if text.count("!") >= 3:
-        penalty += 4
-
-    return penalty
+    return min(count * 3, 10)
 
 
 def calculate_score(article):
-    title = normalize(
-        article.get("title", "")
-    )
-
-    description = normalize(
-        article.get("description", "")
-    )
+    title = normalize(article.get("title", ""))
+    description = normalize(article.get("description", ""))
 
     text = title + " " + description
 
     score = 0
 
-    # Свежесть
-    age = age_hours(
-        article.get("date")
-    )
+    score += source_score(article.get("source", ""))
 
-    if age <= 2:
+    if contains_any(text, CRITICAL_WORDS):
         score += 8
-    elif age <= 6:
-        score += 6
-    elif age <= 12:
-        score += 5
-    elif age <= 24:
-        score += 4
-    elif age <= 48:
-        score += 2
 
-    # Источник
-    score += source_score(
-        article.get("source", "")
-    )
-
-    # Деньги
     if contains_any(text, MONEY_WORDS):
-        score += 4
+        score += 5
 
-    # Финансы
     if contains_any(text, FINANCE_WORDS):
         score += 4
 
-    # Рынки
+    if contains_any(text, TECH_WORDS):
+        score += 4
+
     if contains_any(text, MARKET_WORDS):
         score += 4
 
-    # Технологии
-    if contains_any(text, TECH_WORDS):
-        score += 3
-
-    # Макро
     if contains_any(text, MACRO_WORDS):
+        score += 4
+
+    if contains_any(text, USA_WORDS):
+        score += 2
+
+    if contains_any(text, RUSSIA_WORDS):
+        score += 2
+
+    if extract_numbers(text):
         score += 3
 
-    # Крупные события
-    for word in CRITICAL_WORDS:
-        if word in text:
-            score += 5
-
-    # Компании
-    companies = detect_companies(article)
-
-    score += min(
-        len(companies) * 2,
-        8
-    )
-
-    # Крупные суммы
-    numbers = extract_numbers(
-        article.get("title", "") +
-        " " +
-        article.get("description", "")
-    )
-
-    if numbers:
+    if detect_companies(text):
         score += 3
 
-    # Кликбейт
-    score -= clickbait_penalty(text)
+    if contains_any(text, LOW_VALUE_WORDS):
+        score -= 8
 
-    # Низкокачественный контент
-    for word in LOW_VALUE_WORDS:
-        if word in text:
-            score -= 10
+    score -= clickbait_penalty(title)
+
+    age = age_hours(article.get("published"))
+
+    if age <= 6:
+        score += 5
+    elif age <= 12:
+        score += 4
+    elif age <= 24:
+        score += 2
+    elif age > 48:
+        score -= 10
 
     return score
 
 
 # =========================================================
-# SIMILARITY
+# СХОЖЕСТЬ НОВОСТЕЙ
 # =========================================================
 
 def important_words(text):
-    words = re.findall(
-        r"\b[a-zа-яё0-9][a-zа-яё0-9\-]{3,}\b",
-        normalize(text),
-        flags=re.IGNORECASE
-    )
+    words = re.findall(r"[a-zа-яё0-9]{4,}", normalize(text))
 
-    stop = {
-        "this", "that", "with",
-        "from", "have", "will",
-        "about", "after", "before",
-        "into", "their", "they",
-        "them", "were", "been",
-        "said", "says", "which",
-        "when", "where", "what",
-        "как", "это", "для",
-        "что", "при", "после",
-        "перед", "также", "будет",
-        "был", "была", "были"
+    stop_words = {
+        "this",
+        "that",
+        "with",
+        "from",
+        "about",
+        "after",
+        "before",
+        "their",
+        "there",
+        "which",
+        "will",
+        "would",
+        "have",
+        "been",
+        "бизнес",
+        "компания",
+        "новости",
     }
 
-    result = []
-
-    for word in words:
-
-        if word in stop:
-            continue
-
-        if word not in result:
-            result.append(word)
-
-    return result[:35]
+    return {
+        word
+        for word in words
+        if word not in stop_words
+    }
 
 
-def similarity(a, b):
-    a_words = set(
-        important_words(
-            a.get("title", "")
-        )
-    )
+def similarity(text1, text2):
+    a = important_words(text1)
+    b = important_words(text2)
 
-    b_words = set(
-        important_words(
-            b.get("title", "")
-        )
-    )
-
-    if not a_words or not b_words:
+    if not a or not b:
         return 0
 
-    return len(
-        a_words & b_words
-    ) / len(
-        a_words | b_words
-    )
+    intersection = len(a & b)
+    union = len(a | b)
+
+    return intersection / union
 
 
 def remove_similar_news(articles):
     result = []
 
     for article in articles:
-
         duplicate = False
 
         for existing in result:
+            sim = similarity(
+                article.get("title", ""),
+                existing.get("title", ""),
+            )
 
-            if similarity(
-                article,
-                existing
-            ) >= 0.52:
-
+            if sim >= 0.65:
                 duplicate = True
                 break
 
@@ -866,913 +824,440 @@ def remove_similar_news(articles):
 
 
 # =========================================================
-# EDITORIAL ENGINE
+# РУССКИЙ РЕДАКТОРСКИЙ ЗАГОЛОВОК
 # =========================================================
 
 def editorial_title(article):
-    title = clean_text(
+    title = article.get("ru_title") or translate_text(
         article.get("title", "")
     )
 
-    # Убираем типичный мусор Google News
+    title = clean_text(title)
+
+    # Убираем типичный хвост Google News
     title = re.sub(
-        r"\s*-\s*[^-]{2,40}$",
+        r"\s+[—-]\s+(Reuters|CNBC|BBC|CNN|Bloomberg|Forbes)\s*$",
         "",
-        title
-    ).strip()
-
-    title = shorten(
         title,
-        170
+        flags=re.I,
     )
 
-    lower = normalize(title)
+    if not title:
+        title = "Важная новость бизнеса"
 
-    urgent = contains_any(
-        lower,
-        CRITICAL_WORDS
-    )
-
-    market = contains_any(
-        lower,
-        MARKET_WORDS
-    )
-
-    numbers = extract_numbers(title)
-
-    prefix = ""
-
-    if urgent:
-        prefix = "🚨 "
-    elif market:
-        prefix = "📈 "
-
-    # Не добавляем emoji дважды
-    if title.startswith(
-        ("🔥", "🚨", "📈", "💰", "⚡")
-    ):
-        prefix = ""
-
-    # Для важных финансовых новостей
-    if numbers and not prefix:
-        prefix = "💰 "
-
-    return prefix + title
-
-
-def generate_summary(article):
-    description = clean_text(
-        article.get("description", "")
-    )
-
-    title = clean_text(
-        article.get("title", "")
-    )
-
-    if description:
-        summary = description
-    else:
-        summary = title
-
-    summary = re.sub(
-        r"\s*-\s*[^-]{2,40}$",
-        "",
-        summary
-    )
-
-    return shorten(
-        summary,
-        430
-    )
-
-
-def generate_analysis(article):
-    category = detect_category(article)
-
-    text = normalize(
-        article.get("title", "") +
-        " " +
-        article.get("description", "")
-    )
-
-    companies = detect_companies(
-        article
-    )
-
-    numbers = extract_numbers(
-        article.get("title", "") +
-        " " +
-        article.get("description", "")
-    )
-
-    if category == "Рынки":
-        reason = (
-            "событие может повлиять на настроения "
-            "инвесторов и движение активов"
-        )
-
-    elif category == "Финансы":
-        reason = (
-            "новость связана с финансовыми условиями "
-            "и может иметь последствия для рынка"
-        )
-
-    elif category == "Технологии":
-        reason = (
-            "событие важно для технологического сектора "
-            "и крупных игроков рынка"
-        )
-
-    elif category == "Энергетика":
-        reason = (
-            "изменения в энергетическом секторе "
-            "могут отражаться на стоимости сырья и компаний"
-        )
-
-    elif category == "Экономика":
-        reason = (
-            "изменение экономических условий "
-            "может повлиять на бизнес и потребителей"
-        )
-
-    elif category == "Россия":
-        reason = (
-            "событие имеет значение для российского "
-            "бизнеса или экономики"
-        )
-
-    elif category == "США":
-        reason = (
-            "решение или событие может отразиться "
-            "на американском рынке"
-        )
-
-    else:
-        reason = (
-            "событие представляет интерес "
-            "для деловой аудитории"
-        )
-
-    if companies:
-        reason += (
-            f". В новости фигурирует "
-            f"{companies[0].title()}"
-        )
-
-    if numbers:
-        reason += (
-            f". Ключевой показатель: {numbers[0]}"
-        )
-
-    return reason + "."
-
-
-def hashtags(article):
-    category = detect_category(article)
-
-    mapping = {
-        "Технологии":
-            "#Технологии #AI #Бизнес",
-        "Рынки":
-            "#Рынки #Акции #Инвестиции",
-        "Финансы":
-            "#Финансы #Деньги #Экономика",
-        "Энергетика":
-            "#Энергетика #Нефть #Газ",
-        "Россия":
-            "#Россия #Бизнес #Экономика",
-        "США":
-            "#США #Бизнес #Экономика",
-        "Экономика":
-            "#Экономика #Бизнес #Рынки",
-        "Бизнес":
-            "#Бизнес #Компании #Экономика"
-    }
-
-    result = mapping.get(
-        category,
-        "#Бизнес #Экономика"
-    )
-
-    companies = detect_companies(
-        article
-    )
-
-    if companies:
-
-        company_tag = re.sub(
-            r"[^A-Za-zА-Яа-я0-9]",
-            "",
-            companies[0]
-        )
-
-        if company_tag:
-            result += " #" + company_tag
-
-    return result
+    return title
 
 
 # =========================================================
-# MARKET DATA
+# КРАТКОЕ ОПИСАНИЕ
+# =========================================================
+
+def generate_summary(article):
+    description = (
+        article.get("ru_description")
+        or translate_text(article.get("description", ""))
+    )
+
+    description = clean_text(description)
+
+    if not description:
+        return "Подробности события уточняются."
+
+    return shorten(description, 430)
+
+
+# =========================================================
+# АНАЛИЗ "ПОЧЕМУ ЭТО ВАЖНО"
+# =========================================================
+
+def generate_analysis(article):
+    text = normalize(
+        article.get("title", "")
+        + " "
+        + article.get("description", "")
+    )
+
+    category = detect_category(article)
+
+    if contains_any(text, CRITICAL_WORDS):
+        return (
+            "Событие может иметь повышенное влияние на рынок, "
+            "бизнес или инвестиционные ожидания."
+        )
+
+    if contains_any(text, MARKET_WORDS):
+        return (
+            "Новость может повлиять на настроения инвесторов "
+            "и динамику финансовых рынков."
+        )
+
+    if contains_any(text, FINANCE_WORDS):
+        return (
+            "Изменения в финансовом секторе могут отразиться "
+            "на стоимости кредитов, капитале и деловой активности."
+        )
+
+    if contains_any(text, TECH_WORDS):
+        return (
+            "Событие может повлиять на развитие технологий, "
+            "инвестиции и конкуренцию между компаниями."
+        )
+
+    if category == "Экономика":
+        return (
+            "Новость важна для оценки экономической ситуации "
+            "и перспектив деловой активности."
+        )
+
+    return (
+        "Событие представляет интерес для бизнеса "
+        "и может повлиять на участников рынка."
+    )
+
+
+# =========================================================
+# ХЭШТЕГИ
+# =========================================================
+
+def hashtags(article):
+    text = normalize(
+        article.get("title", "")
+        + " "
+        + article.get("description", "")
+    )
+
+    tags = ["#МРК", "#БизнесНовости"]
+
+    category = detect_category(article)
+
+    category_tags = {
+        "Технологии": "#Технологии",
+        "Рынки": "#Рынки",
+        "Финансы": "#Финансы",
+        "Экономика": "#Экономика",
+        "Россия": "#Россия",
+        "США": "#США",
+        "Бизнес": "#Бизнес",
+    }
+
+    if category in category_tags:
+        tags.append(category_tags[category])
+
+    if "nvidia" in text:
+        tags.append("#NVIDIA")
+
+    if "tesla" in text:
+        tags.append("#Tesla")
+
+    if "apple" in text:
+        tags.append("#Apple")
+
+    if "microsoft" in text:
+        tags.append("#Microsoft")
+
+    if "bitcoin" in text:
+        tags.append("#Bitcoin")
+
+    return " ".join(tags[:6])
+
+
+# =========================================================
+# YAHOO FINANCE
 # =========================================================
 
 def yahoo_quote(ticker):
     try:
-
         url = (
-            "https://query1.finance.yahoo.com/"
-            "v8/finance/chart/"
+            "https://query1.finance.yahoo.com/v8/finance/chart/"
             + quote_plus(ticker)
         )
 
-        params = {
-            "range": "1d",
-            "interval": "1m"
-        }
-
-        r = requests.get(
+        response = requests.get(
             url,
-            params=params,
             headers=HEADERS,
-            timeout=12
+            timeout=10,
         )
 
-        r.raise_for_status()
+        response.raise_for_status()
 
-        data = r.json()
+        data = response.json()
 
-        result = data.get(
-            "chart",
-            {}
-        ).get(
-            "result"
-        )
+        result = data["chart"]["result"][0]
 
-        if not result:
+        meta = result.get("meta", {})
+
+        price = meta.get("regularMarketPrice")
+        previous = meta.get("previousClose")
+
+        if price is None:
             return None
 
-        meta = result[0].get(
-            "meta",
-            {}
-        )
+        change = None
 
-        price = meta.get(
-            "regularMarketPrice"
-        )
-
-        previous = meta.get(
-            "chartPreviousClose"
-        )
-
-        if price is None or previous is None:
-            return None
-
-        change = price - previous
-
-        percent = (
-            change / previous * 100
-            if previous
-            else 0
-        )
+        if previous:
+            change = ((price - previous) / previous) * 100
 
         return {
             "ticker": ticker,
             "price": price,
             "change": change,
-            "percent": percent
         }
-
-    except Exception as e:
-
-        print(
-            "MARKET ERROR",
-            ticker,
-            e
-        )
-
-        return None
-
-
-def market_snapshot(article):
-    companies = detect_companies(
-        article
-    )
-
-    result = []
-
-    for company in companies:
-
-        ticker = COMPANIES.get(
-            company
-        )
-
-        if not ticker:
-            continue
-
-        quote = yahoo_quote(
-            ticker
-        )
-
-        if quote:
-            quote["company"] = company
-            result.append(quote)
-
-    return result[:3]
-
-
-def global_market_snapshot():
-    tickers = {
-        "S&P 500": "^GSPC",
-        "NASDAQ": "^IXIC",
-        "Brent": "BZ=F",
-        "Bitcoin": "BTC-USD"
-    }
-
-    result = []
-
-    for name, ticker in tickers.items():
-
-        quote = yahoo_quote(
-            ticker
-        )
-
-        if quote:
-
-            quote["name"] = name
-            result.append(quote)
-
-    return result
-
-
-# =========================================================
-# CURRENCY
-# =========================================================
-
-def currency_rate(pair):
-    try:
-
-        url = (
-            "https://query1.finance.yahoo.com/"
-            "v8/finance/chart/"
-            + quote_plus(pair)
-        )
-
-        params = {
-            "range": "1d",
-            "interval": "1d"
-        }
-
-        r = requests.get(
-            url,
-            params=params,
-            headers=HEADERS,
-            timeout=10
-        )
-
-        r.raise_for_status()
-
-        data = r.json()
-
-        result = data.get(
-            "chart",
-            {}
-        ).get(
-            "result"
-        )
-
-        if not result:
-            return None
-
-        meta = result[0].get(
-            "meta",
-            {}
-        )
-
-        return meta.get(
-            "regularMarketPrice"
-        )
 
     except Exception:
         return None
 
 
+def market_snapshot(article):
+    companies = detect_companies(
+        article.get("title", "")
+        + " "
+        + article.get("description", "")
+    )
+
+    results = []
+
+    for company in companies[:3]:
+        ticker = COMPANIES.get(company)
+
+        if not ticker:
+            continue
+
+        quote = yahoo_quote(ticker)
+
+        if quote:
+            results.append(quote)
+
+    return results
+
+
+def global_market_snapshot():
+    instruments = [
+        ("S&P 500", "^GSPC"),
+        ("NASDAQ", "^IXIC"),
+        ("Brent", "BZ=F"),
+        ("Bitcoin", "BTC-USD"),
+    ]
+
+    results = []
+
+    for name, ticker in instruments:
+        quote = yahoo_quote(ticker)
+
+        if quote:
+            quote["name"] = name
+            results.append(quote)
+
+    return results
+
+
+def currency_rate():
+    quote = yahoo_quote("EURUSD=X")
+
+    if not quote:
+        return None
+
+    return quote.get("price")
+
+
 # =========================================================
-# IMAGE SEARCH
+# ИЗОБРАЖЕНИЯ
 # =========================================================
 
-def add_image(
-    candidates,
-    url,
-    source_type,
-    alt="",
-    title="",
-    context=""
-):
+def add_image(images, url, score=0):
     if not url:
         return
 
     url = url.strip()
 
-    if url.startswith("//"):
-        url = "https:" + url
-
-    if not url.startswith(
-        ("http://", "https://")
-    ):
+    if not url.startswith("http"):
         return
 
-    candidates.append({
-        "url": url,
-        "source_type": source_type,
-        "alt": clean_text(alt),
-        "title": clean_text(title),
-        "context": clean_text(context)
-    })
+    if url not in [x["url"] for x in images]:
+        images.append(
+            {
+                "url": url,
+                "score": score,
+            }
+        )
 
 
 def extract_srcset(value):
-    result = []
+    results = []
 
-    for item in value.split(","):
+    if not value:
+        return results
 
-        parts = item.strip().split()
+    for part in value.split(","):
+        part = part.strip()
 
-        if parts:
-            result.append(
-                parts[0]
-            )
+        if not part:
+            continue
 
-    return result
+        url = part.split(" ")[0].strip()
+
+        if url.startswith("http"):
+            results.append(url)
+
+    return results
 
 
-def extract_images(page_html, page_url):
-    candidates = []
+def extract_images(page_url, article):
+    images = []
 
+    response = fetch(page_url, timeout=20)
+
+    if not response:
+        return images
+
+    content = response.text
+
+    # og:image
     patterns = [
-        (
-            r'<meta[^>]+property=["\']og:image'
-            r'["\'][^>]+content=["\']([^"\']+)',
-            "og"
-        ),
-        (
-            r'<meta[^>]+content=["\']([^"\']+)'
-            r'["\'][^>]+property=["\']og:image',
-            "og"
-        ),
-        (
-            r'<meta[^>]+name=["\']twitter:image'
-            r'["\'][^>]+content=["\']([^"\']+)',
-            "twitter"
-        ),
-        (
-            r'<meta[^>]+content=["\']([^"\']+)'
-            r'["\'][^>]+name=["\']twitter:image',
-            "twitter"
-        ),
-        (
-            r'<link[^>]+rel=["\']image_src'
-            r'["\'][^>]+href=["\']([^"\']+)',
-            "image_src"
-        )
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+
+        r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
     ]
 
-    for pattern, source in patterns:
-
-        for match in re.findall(
-            pattern,
-            page_html,
-            flags=re.IGNORECASE
-        ):
-
-            add_image(
-                candidates,
-                urljoin(
-                    page_url,
-                    match
-                ),
-                source
-            )
+    for pattern in patterns:
+        for match in re.findall(pattern, content, flags=re.I):
+            add_image(images, match, 10)
 
     # JSON-LD
-    blocks = re.findall(
-        r'<script[^>]+type=["\']'
-        r'application/ld\+json["\'][^>]*>'
-        r'(.*?)</script>',
-        page_html,
-        flags=re.IGNORECASE |
-        re.DOTALL
+    jsonld_matches = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        content,
+        flags=re.I | re.S,
     )
 
-    for block in blocks:
-
+    for block in jsonld_matches:
         try:
+            data = json.loads(block)
 
-            data = json.loads(
-                html.unescape(
-                    block.strip()
-                )
-            )
-
-            objects = (
-                data
-                if isinstance(data, list)
-                else [data]
-            )
+            objects = data if isinstance(data, list) else [data]
 
             for obj in objects:
-
                 if not isinstance(obj, dict):
                     continue
 
-                image = obj.get(
-                    "image"
-                )
+                image = obj.get("image")
 
-                if isinstance(
-                    image,
-                    str
-                ):
-                    add_image(
-                        candidates,
-                        urljoin(
-                            page_url,
-                            image
-                        ),
-                        "jsonld"
-                    )
+                if isinstance(image, str):
+                    add_image(images, image, 8)
 
-                elif isinstance(
-                    image,
-                    list
-                ):
+                elif isinstance(image, list):
+                    for item in image:
+                        if isinstance(item, str):
+                            add_image(images, item, 8)
 
-                    for img in image[:5]:
+                elif isinstance(image, dict):
+                    image_url = image.get("url")
 
-                        if isinstance(
-                            img,
-                            str
-                        ):
-                            add_image(
-                                candidates,
-                                urljoin(
-                                    page_url,
-                                    img
-                                ),
-                                "jsonld"
-                            )
-
-                        elif isinstance(
-                            img,
-                            dict
-                        ):
-
-                            img_url = img.get(
-                                "url"
-                            )
-
-                            if img_url:
-                                add_image(
-                                    candidates,
-                                    urljoin(
-                                        page_url,
-                                        img_url
-                                    ),
-                                    "jsonld"
-                                )
+                    if image_url:
+                        add_image(images, image_url, 8)
 
         except Exception:
-            continue
+            pass
 
-    # IMG
-    for match in re.finditer(
-        r"<img\b([^>]+)>",
-        page_html,
-        flags=re.IGNORECASE |
-        re.DOTALL
+    # img
+    img_tags = re.findall(
+        r"<img\b[^>]*>",
+        content,
+        flags=re.I,
+    )
+
+    for tag in img_tags[:80]:
+        src_matches = re.findall(
+            r'(?:src|data-src|data-original)=["\']([^"\']+)',
+            tag,
+            flags=re.I,
+        )
+
+        for src in src_matches:
+            add_image(images, src, 4)
+
+        srcset_matches = re.findall(
+            r'srcset=["\']([^"\']+)',
+            tag,
+            flags=re.I,
+        )
+
+        for srcset in srcset_matches:
+            for src in extract_srcset(srcset):
+                add_image(images, src, 5)
+
+    return images
+
+
+def image_score(url, article):
+    url_lower = normalize(url)
+
+    text = normalize(
+        article.get("title", "")
+        + " "
+        + article.get("description", "")
+    )
+
+    score = 0
+
+    if any(x in url_lower for x in ["logo", "icon", "avatar", "sprite"]):
+        score -= 10
+
+    if any(x in url_lower for x in ["thumb", "thumbnail"]):
+        score -= 2
+
+    for theme, words in IMAGE_THEMES.items():
+        if any(word in text for word in words):
+            if any(word in url_lower for word in words):
+                score += 5
+
+    if any(
+        x in url_lower
+        for x in [
+            "photo",
+            "image",
+            "media",
+            "article",
+            "news",
+        ]
     ):
-
-        attrs = match.group(1)
-
-        src = ""
-
-        for attr in [
-            "src",
-            "data-src",
-            "data-lazy-src"
-        ]:
-
-            found = re.search(
-                rf'\b{attr}=["\']([^"\']+)',
-                attrs,
-                flags=re.IGNORECASE
-            )
-
-            if found:
-                src = found.group(1)
-                break
-
-        if not src:
-            continue
-
-        alt_match = re.search(
-            r'\balt=["\']([^"\']*)',
-            attrs,
-            flags=re.IGNORECASE
-        )
-
-        title_match = re.search(
-            r'\btitle=["\']([^"\']*)',
-            attrs,
-            flags=re.IGNORECASE
-        )
-
-        alt = (
-            alt_match.group(1)
-            if alt_match
-            else ""
-        )
-
-        title = (
-            title_match.group(1)
-            if title_match
-            else ""
-        )
-
-        context = clean_text(
-            page_html[
-                max(0, match.start() - 600):
-                min(
-                    len(page_html),
-                    match.end() + 600
-                )
-            ]
-        )
-
-        add_image(
-            candidates,
-            urljoin(
-                page_url,
-                src
-            ),
-            "img",
-            alt,
-            title,
-            context
-        )
-
-        srcset = re.search(
-            r'\bsrcset=["\']([^"\']+)',
-            attrs,
-            flags=re.IGNORECASE
-        )
-
-        if srcset:
-
-            for srcset_url in extract_srcset(
-                srcset.group(1)
-            ):
-
-                add_image(
-                    candidates,
-                    urljoin(
-                        page_url,
-                        srcset_url
-                    ),
-                    "srcset",
-                    alt,
-                    title,
-                    context
-                )
-
-    # Дедупликация
-    unique = []
-    seen = set()
-
-    for item in candidates:
-
-        if item["url"] in seen:
-            continue
-
-        seen.add(
-            item["url"]
-        )
-
-        unique.append(item)
-
-    return unique
-
-
-def image_score(article, candidate):
-    article_text = normalize(
-        article.get("title", "") +
-        " " +
-        article.get("description", "")
-    )
-
-    metadata = normalize(
-        candidate.get("alt", "") +
-        " " +
-        candidate.get("title", "") +
-        " " +
-        candidate.get("context", "") +
-        " " +
-        candidate.get("url", "")
-    )
-
-    category = detect_category(
-        article
-    )
-
-    theme_map = {
-        "Технологии": "technology",
-        "Рынки": "markets",
-        "Финансы": "finance",
-        "Энергетика": "energy",
-        "Россия": "russia"
-    }
-
-    score = {
-        "og": 7,
-        "twitter": 6,
-        "jsonld": 6,
-        "image_src": 5,
-        "srcset": 3,
-        "img": 2
-    }.get(
-        candidate.get("source_type"),
-        1
-    )
-
-    theme = theme_map.get(
-        category
-    )
-
-    if theme:
-
-        for word in IMAGE_THEMES.get(
-            theme,
-            []
-        ):
-
-            if word in metadata:
-                score += 6
-
-    for word in important_words(
-        article.get("title", "") +
-        " " +
-        article.get("description", "")
-    ):
-
-        if len(word) >= 5 and word in metadata:
-            score += 2
-
-    for company in detect_companies(
-        article
-    ):
-
-        if company in metadata:
-            score += 12
-
-    for word in GENERIC_IMAGE_WORDS:
-
-        if word in metadata:
-            score -= 10
-
-    if "logo" in metadata:
-        score -= 15
-
-    if "placeholder" in metadata:
-        score -= 15
+        score += 2
 
     return score
 
 
-def get_best_image(article, used_images):
-    url = article.get("url")
+def get_best_image(article):
+    candidates = extract_images(
+        article.get("link", ""),
+        article,
+    )
 
-    if not url:
+    if not candidates:
         return None
-
-    try:
-
-        r = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=20
-        )
-
-        r.raise_for_status()
-
-        candidates = extract_images(
-            r.text,
-            r.url
-        )
-
-    except Exception as e:
-
-        print(
-            "IMAGE PAGE ERROR:",
-            e
-        )
-
-        return None
-
-    ranked = []
 
     for candidate in candidates:
-
-        candidate["score"] = image_score(
+        candidate["score"] += image_score(
+            candidate["url"],
             article,
-            candidate
         )
 
-        ranked.append(candidate)
-
-    ranked.sort(
+    candidates.sort(
         key=lambda x: x["score"],
-        reverse=True
+        reverse=True,
     )
 
-    print(
-        "IMAGE CANDIDATES:",
-        len(ranked)
-    )
+    used_images = load_used_images()
 
-    for candidate in ranked[:15]:
+    for candidate in candidates:
+        url = candidate["url"]
 
-        print(
-            "IMAGE:",
-            candidate["score"],
-            candidate["source_type"],
-            candidate["url"][:120]
-        )
+        image_hash = hashlib.sha256(
+            url.encode("utf-8")
+        ).hexdigest()
 
-        try:
-
-            response = requests.get(
-                candidate["url"],
-                headers=HEADERS,
-                timeout=25,
-                stream=True
-            )
-
-            response.raise_for_status()
-
-            content_type = (
-                response.headers.get(
-                    "Content-Type",
-                    ""
-                )
-                .lower()
-                .split(";")[0]
-            )
-
-            if content_type not in {
-                "image/jpeg",
-                "image/jpg",
-                "image/png"
-            }:
-                continue
-
-            chunks = []
-            total = 0
-
-            for chunk in response.iter_content(
-                chunk_size=64 * 1024
-            ):
-
-                if not chunk:
-                    continue
-
-                total += len(chunk)
-
-                if total > MAX_IMAGE_SIZE:
-                    break
-
-                chunks.append(chunk)
-
-            content = b"".join(
-                chunks
-            )
-
-            if len(content) < 5000:
-                continue
-
-            image_hash = hashlib.sha256(
-                content
-            ).hexdigest()
-
-            if image_hash in used_images:
-                continue
-
-            return {
-                "content": content,
-                "hash": image_hash,
-                "score": candidate["score"]
-            }
-
-        except Exception:
-            continue
+        if image_hash not in used_images:
+            return url
 
     return None
 
@@ -1783,206 +1268,217 @@ def get_best_image(article, used_images):
 
 def tg_url(method):
     return (
-        f"https://api.telegram.org/bot"
-        f"{BOT_TOKEN}/{method}"
+        f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     )
 
 
-def send_message(
-    text,
-    keyboard
-):
-    try:
+def send_message(text, reply_markup=None):
+    payload = {
+        "chat_id": CHANNEL,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": False,
+    }
 
-        r = requests.post(
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(
+            reply_markup,
+            ensure_ascii=False,
+        )
+
+    try:
+        response = requests.post(
             tg_url("sendMessage"),
-            data={
-                "chat_id": CHANNEL,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_markup": json.dumps(
-                    keyboard
-                )
-            },
-            timeout=30
+            data=payload,
+            timeout=30,
         )
 
         print(
-            "TELEGRAM MESSAGE:",
-            r.status_code,
-            r.text[:500]
+            "Telegram message:",
+            response.status_code,
+            response.text[:500],
         )
 
-        return r.ok
+        return response.ok
 
     except Exception as e:
-
-        print(
-            "TELEGRAM ERROR:",
-            e
-        )
+        print("Telegram error:", e)
 
         return False
 
 
-def send_photo(
-    image,
-    caption,
-    keyboard
-):
+def send_photo(image_url, caption, reply_markup=None):
     try:
+        image_response = requests.get(
+            image_url,
+            headers=HEADERS,
+            timeout=20,
+        )
 
-        r = requests.post(
+        image_response.raise_for_status()
+
+        content = image_response.content
+
+        if len(content) > MAX_IMAGE_SIZE:
+            print("Image is too large")
+
+            return False
+
+        files = {
+            "photo": (
+                "news.jpg",
+                content,
+                image_response.headers.get(
+                    "Content-Type",
+                    "image/jpeg",
+                ),
+            )
+        }
+
+        data = {
+            "chat_id": CHANNEL,
+            "caption": caption,
+            "parse_mode": "HTML",
+        }
+
+        if reply_markup:
+            data["reply_markup"] = json.dumps(
+                reply_markup,
+                ensure_ascii=False,
+            )
+
+        response = requests.post(
             tg_url("sendPhoto"),
-            data={
-                "chat_id": CHANNEL,
-                "caption": caption,
-                "parse_mode": "HTML",
-                "reply_markup": json.dumps(
-                    keyboard
-                )
-            },
-            files={
-                "photo": (
-                    "news.jpg",
-                    image,
-                    "image/jpeg"
-                )
-            },
-            timeout=60
+            data=data,
+            files=files,
+            timeout=40,
         )
 
         print(
-            "TELEGRAM PHOTO:",
-            r.status_code,
-            r.text[:500]
+            "Telegram photo:",
+            response.status_code,
+            response.text[:500],
         )
 
-        return r.ok
+        return response.ok
 
     except Exception as e:
-
-        print(
-            "PHOTO ERROR:",
-            e
-        )
+        print("Photo error:", e)
 
         return False
 
 
 # =========================================================
-# POST BUILDER
+# ПОСТ
 # =========================================================
 
 def build_post(article):
-    title = editorial_title(
-        article
+    # Сначала переводим всю новость
+    prepare_russian_article(article)
+
+    title = editorial_title(article)
+    summary = generate_summary(article)
+
+    category = detect_category(article)
+
+    original_text = (
+        article.get("title", "")
+        + " "
+        + article.get("description", "")
     )
 
-    summary = generate_summary(
-        article
-    )
+    numbers = extract_numbers(original_text)
 
-    category = detect_category(
-        article
-    )
+    analysis = generate_analysis(article)
 
-    numbers = extract_numbers(
-        article.get("title", "") +
-        " " +
-        article.get("description", "")
-    )
-
-    analysis = generate_analysis(
-        article
-    )
-
-    company_data = market_snapshot(
-        article
-    )
+    company_data = market_snapshot(article)
 
     lines = []
 
+    # Заголовок
     lines.append(
-        f"<b>{escape_html(title)}</b>"
+        f"<b>📰 {escape_html(title)}</b>"
     )
 
-    if summary:
-        lines.append(
-            escape_html(summary)
-        )
+    lines.append("")
 
-    # Ключевые показатели
+    # Краткое описание
+    lines.append(
+        f"{escape_html(summary)}"
+    )
+
+    # Важные цифры
     if numbers:
+        lines.append("")
+        lines.append("<b>📊 Ключевые показатели:</b>")
 
-        lines.append(
-            "<b>💰 Ключевые показатели:</b>\n"
-            +
-            "\n".join(
-                f"• {escape_html(x)}"
-                for x in numbers[:4]
+        for number in numbers[:5]:
+            lines.append(
+                f"• {escape_html(number)}"
             )
-        )
 
     # Компания / рынок
     if company_data:
-
-        market_lines = []
+        lines.append("")
+        lines.append("<b>💹 Рынок:</b>")
 
         for item in company_data:
+            price = item.get("price")
+            change = item.get("change")
 
-            sign = (
-                "📈"
-                if item["percent"] >= 0
-                else "📉"
-            )
+            if price is None:
+                continue
 
-            market_lines.append(
-                f"{sign} "
-                f"<b>{escape_html(item['company'].title())}</b>: "
-                f"{item['price']:.2f} "
-                f"({item['percent']:+.2f}%)"
-            )
+            if change is not None:
+                sign = "+" if change >= 0 else ""
 
-        lines.append(
-            "<b>📊 Рынок:</b>\n" +
-            "\n".join(market_lines)
-        )
+                lines.append(
+                    f"• {item['ticker']}: "
+                    f"{price:.2f} "
+                    f"({sign}{change:.2f}%)"
+                )
 
+            else:
+                lines.append(
+                    f"• {item['ticker']}: {price:.2f}"
+                )
+
+    # Анализ
+    lines.append("")
+    lines.append("<b>💡 Почему это важно:</b>")
     lines.append(
-        f"<b>💡 Почему это важно:</b>\n"
-        f"{escape_html(analysis)}"
+        escape_html(analysis)
     )
 
+    # Категория
+    lines.append("")
     lines.append(
-        f"<b>Категория:</b> "
-        f"#{escape_html(category)}"
+        f"<b>Категория:</b> {escape_html(category)}"
     )
 
+    # Источник
+    source = article.get("source", "Источник")
+
+    lines.append("")
     lines.append(
-        f"<i>Источник: "
-        f"{escape_html(article.get('source', 'Источник'))}"
-        f"</i>"
+        f"<b>Источник:</b> {escape_html(source)}"
     )
 
-    lines.append(
-        hashtags(article)
-    )
-
-    return "\n\n".join(lines)
+    return "\n".join(lines)
 
 
 def keyboard(article):
+    link = article.get("link")
+
+    if not link:
+        return None
+
     return {
         "inline_keyboard": [
             [
                 {
-                    "text": "📰 Читать источник",
-                    "url": article.get(
-                        "url",
-                        ""
-                    )
+                    "text": "🔗 Читать источник",
+                    "url": link,
                 }
             ]
         ]
@@ -1990,123 +1486,84 @@ def keyboard(article):
 
 
 # =========================================================
-# QUALITY CONTROL
+# ПРОВЕРКА КАЧЕСТВА
 # =========================================================
 
-def quality_check(article):
-    title = clean_text(
-        article.get("title", "")
+def quality_check(post):
+    if not post:
+        return False
+
+    # Telegram caption имеет ограничение.
+    if len(post) > 1000:
+        return False
+
+    # Проверяем, что в посте есть кириллица
+    cyrillic = len(
+        re.findall(r"[а-яё]", post.lower())
     )
 
-    description = clean_text(
-        article.get("description", "")
-    )
+    if cyrillic < 20:
+        return False
 
-    if len(title) < 15:
-        return False, "short title"
-
-    if len(title) > 300:
-        return False, "title too long"
-
-    if not article.get("url"):
-        return False, "no url"
-
-    if age_hours(
-        article.get("date")
-    ) > MAX_NEWS_AGE_HOURS:
-        return False, "too old"
-
-    text = normalize(
-        title + " " + description
-    )
-
-    if all(
-        word in text
-        for word in LOW_VALUE_WORDS[:2]
-    ):
-        return False, "low value"
-
-    if clickbait_penalty(text) >= 8:
-        return False, "clickbait"
-
-    return True, "OK"
+    return True
 
 
 # =========================================================
-# NEWS SELECTION
+# ВЫБОР НОВОСТЕЙ
 # =========================================================
 
-def select_articles(
-    articles,
-    posted
-):
+def select_articles(articles, posted):
     candidates = []
 
-    seen_urls = set()
-
     for article in articles:
+        link = article.get("link", "")
 
-        url = article.get(
-            "url"
-        )
-
-        if not url:
+        if not link:
             continue
 
-        if url in posted:
+        if link in posted:
             continue
 
-        if url in seen_urls:
+        if age_hours(article.get("published")) > MAX_NEWS_AGE_HOURS:
             continue
 
-        seen_urls.add(url)
+        article["score"] = calculate_score(article)
 
-        if age_hours(
-            article.get("date")
-        ) > MAX_NEWS_AGE_HOURS:
+        if article["score"] < MIN_SCORE:
             continue
 
-        ok, reason = quality_check(
-            article
-        )
-
-        if not ok:
-            print(
-                "REJECT:",
-                reason,
-                article.get("title")
-            )
-            continue
-
-        score = calculate_score(
-            article
-        )
-
-        if score < MIN_SCORE:
-            continue
-
-        article["score"] = score
-        article["category"] = detect_category(
-            article
-        )
-
-        candidates.append(
-            article
-        )
+        candidates.append(article)
 
     candidates.sort(
-        key=lambda x: (
-            x.get("score", 0),
-            -age_hours(
-                x.get("date")
-            )
-        ),
-        reverse=True
+        key=lambda x: x.get("score", 0),
+        reverse=True,
     )
 
-    return remove_similar_news(
-        candidates
-    )[:MAX_CANDIDATES]
+    candidates = candidates[:MAX_CANDIDATES]
+
+    candidates = remove_similar_news(candidates)
+
+    # Немного балансируем категории
+    selected = []
+
+    category_count = {}
+
+    for article in candidates:
+        category = detect_category(article)
+
+        current_count = category_count.get(category, 0)
+
+        if current_count >= 2:
+            continue
+
+        selected.append(article)
+
+        category_count[category] = current_count + 1
+
+        if len(selected) >= MAX_POSTS_PER_RUN:
+            break
+
+    return selected
 
 
 # =========================================================
@@ -2114,231 +1571,209 @@ def select_articles(
 # =========================================================
 
 def main():
-
     if not BOT_TOKEN:
-        raise RuntimeError(
-            "BOT_TOKEN is missing"
-        )
+        print("ERROR: BOT_TOKEN is not configured")
+        return
 
-    print("=" * 70)
-    print(
-        "МРК BUSINESS NEWS BOT 6.0"
-    )
-    print("=" * 70)
+    print("======================================")
+    print("МРК BUSINESS NEWS BOT 6.1")
+    print("Русский перевод включён")
+    print("======================================")
 
     posted = load_posted()
-    used_images = load_used_images()
-
-    print(
-        "Posted:",
-        len(posted)
-    )
-
-    print(
-        "Used images:",
-        len(used_images)
-    )
-
-    # -----------------------------------------------------
-    # RSS
-    # -----------------------------------------------------
 
     all_articles = []
 
-    for name, url in RSS_FEEDS:
+    # -----------------------------------------------------
+    # Загружаем RSS
+    # -----------------------------------------------------
+
+    for source, url in RSS_FEEDS:
+        print("Loading:", source)
+
+        response = fetch(url)
+
+        if not response:
+            print("Failed:", source)
+            continue
+
+        articles = parse_rss(
+            response.text,
+            source,
+        )
 
         print(
-            "\nRSS:",
-            name
+            source,
+            "articles:",
+            len(articles),
         )
 
-        xml = fetch(url)
-
-        parsed = parse_rss(
-            xml,
-            name
-        )
-
-        print(
-            "FOUND:",
-            len(parsed)
-        )
-
-        all_articles.extend(
-            parsed
-        )
+        all_articles.extend(articles)
 
     print(
-        "\nTOTAL:",
-        len(all_articles)
+        "Total RSS articles:",
+        len(all_articles),
     )
 
     # -----------------------------------------------------
-    # Отбор
+    # Убираем дубли по ссылкам
+    # -----------------------------------------------------
+
+    unique = {}
+
+    for article in all_articles:
+        link = article.get("link")
+
+        if link:
+            unique[link] = article
+
+    all_articles = list(unique.values())
+
+    print(
+        "Unique articles:",
+        len(all_articles),
+    )
+
+    # -----------------------------------------------------
+    # Выбор лучших
     # -----------------------------------------------------
 
     selected = select_articles(
         all_articles,
-        posted
+        posted,
     )
 
     print(
-        "SELECTED:",
-        len(selected)
+        "Selected:",
+        len(selected),
     )
 
     # -----------------------------------------------------
     # Публикация
     # -----------------------------------------------------
 
-    published = 0
+    used_images = load_used_images()
 
     for article in selected:
 
-        if published >= MAX_POSTS_PER_RUN:
-            break
-
-        print("\n" + "=" * 70)
-
-        print(
-            "TITLE:",
-            article.get("title")
-        )
-
-        print(
-            "SCORE:",
-            article.get("score")
-        )
-
-        print(
-            "CATEGORY:",
-            article.get("category")
-        )
-
-        # -------------------------------------------------
-        # Формируем пост
-        # -------------------------------------------------
-
-        post = build_post(
-            article
-        )
-
-        # Telegram caption ограничен,
-        # поэтому если пост слишком большой,
-        # используем более короткую версию.
-        if len(post) > 1000:
-
-            post = (
-                f"<b>{escape_html(editorial_title(article))}</b>\n\n"
-                f"{escape_html(shorten(generate_summary(article), 350))}\n\n"
-                f"<b>💡 Почему это важно:</b>\n"
-                f"{escape_html(shorten(generate_analysis(article), 350))}\n\n"
-                f"{hashtags(article)}"
-            )
-
-        kb = keyboard(
-            article
-        )
-
-        # -------------------------------------------------
-        # Фото
-        # -------------------------------------------------
-
-        image = get_best_image(
-            article,
-            used_images
-        )
-
-        success = False
-
-        if image:
-
+        try:
+            print("")
             print(
-                "IMAGE SCORE:",
-                image["score"]
+                "Publishing:",
+                article.get("title"),
             )
 
-            success = send_photo(
-                image["content"],
-                post,
-                kb
+            post = build_post(article)
+
+            # Хэштеги добавляем после формирования текста
+            tags = hashtags(article)
+
+            full_post = (
+                post
+                + "\n\n"
+                + tags
             )
+
+            # Если слишком длинный — сокращаем описание
+            if len(full_post) > 1000:
+                article["ru_description"] = shorten(
+                    article.get("ru_description", ""),
+                    260,
+                )
+
+                post = build_post(article)
+
+                full_post = (
+                    post
+                    + "\n\n"
+                    + tags
+                )
+
+            if not quality_check(full_post):
+                print("Quality check failed")
+
+                continue
+
+            # -------------------------------------------------
+            # Ищем тематическую картинку
+            # -------------------------------------------------
+
+            image_url = get_best_image(article)
+
+            success = False
+
+            if image_url:
+                print(
+                    "Image found:",
+                    image_url[:150],
+                )
+
+                success = send_photo(
+                    image_url,
+                    full_post,
+                    keyboard(article),
+                )
+
+                if success:
+                    image_hash = hashlib.sha256(
+                        image_url.encode("utf-8")
+                    ).hexdigest()
+
+                    if image_hash not in used_images:
+                        used_images.append(image_hash)
+
+            # -------------------------------------------------
+            # Если фото не отправилось — отправляем текст
+            # -------------------------------------------------
+
+            if not success:
+                print(
+                    "Photo failed or unavailable. "
+                    "Sending text."
+                )
+
+                success = send_message(
+                    full_post,
+                    keyboard(article),
+                )
+
+            # -------------------------------------------------
+            # Сохраняем историю
+            # -------------------------------------------------
 
             if success:
+                link = article.get("link")
 
-                used_images.append(
-                    image["hash"]
+                if link and link not in posted:
+                    posted.append(link)
+
+                save_posted(posted)
+                save_used_images(used_images)
+
+                print("SUCCESS:", article.get("title"))
+
+            else:
+                print(
+                    "FAILED:",
+                    article.get("title"),
                 )
 
-                save_json_file(
-                    USED_IMAGES_FILE,
-                    used_images,
-                    2000
-                )
+            # Небольшая пауза
+            time.sleep(2)
 
-        # -------------------------------------------------
-        # Fallback
-        # -------------------------------------------------
-
-        if not success:
-
+        except Exception as e:
             print(
-                "TEXT FALLBACK"
+                "ARTICLE ERROR:",
+                repr(e),
             )
 
-            success = send_message(
-                post,
-                kb
-            )
+    print("")
+    print("Bot finished.")
 
-        # -------------------------------------------------
-        # История
-        # -------------------------------------------------
 
-        if success:
-
-            url = article.get(
-                "url"
-            )
-
-            if url not in posted:
-                posted.append(url)
-
-            save_json_file(
-                POSTED_FILE,
-                posted,
-                1000
-            )
-
-            published += 1
-
-            print(
-                "PUBLISHED:",
-                published
-            )
-
-            time.sleep(4)
-
-        else:
-
-            print(
-                "FAILED:",
-                article.get("url")
-            )
-
-    print("\n" + "=" * 70)
-
-    print(
-        "DONE"
-    )
-
-    print(
-        "Published:",
-        published
-    )
-
-    print("=" * 70)
-
+# =========================================================
+# START
+# =========================================================
 
 if __name__ == "__main__":
     main()
