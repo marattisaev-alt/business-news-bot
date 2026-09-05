@@ -242,23 +242,43 @@ LOW_VALUE_WORDS = {
 # =========================================================
 
 def repair_mojibake(text):
-    """РСЃРїСЂР°РІР»СЏРµС‚ С‚РёРїРёС‡РЅСѓСЋ РѕС€РёР±РєСѓ UTF-8 -> Latin-1/Windows-1252."""
+    """РСЃРїСЂР°РІР»СЏРµС‚ С‚РёРїРёС‡РЅС‹Рµ РІР°СЂРёР°РЅС‚С‹ UTF-8 mojibake, РЅРµ РїРѕСЂС‚СЏ РЅРѕСЂРјР°Р»СЊРЅС‹Р№ С‚РµРєСЃС‚."""
     if not text:
         return ""
 
     value = str(text)
 
-    # Strong indicators of UTF-8 mojibake.
-    bad_markers = ("Гђ", "Г‘", "Гѓ", "Г‚", "Р ", "РЎ")
-    if not any(marker in value for marker in bad_markers):
-        return value
+    def bad_score(s):
+        markers = (
+            "Гђ", "Г‘", "Р ", "РЎ",
+            "Гў", "РІР‚", "РІвЂћ",
+            "Рѓ", "Р‰", "РЉ", "Сњ", "Сљ", "Сџ",
+        )
+        return sum(s.count(marker) for marker in markers)
 
+    before = bad_score(value)
+
+    # Р’Р°СЂРёР°РЅС‚ 1: UTF-8 bytes, РѕС€РёР±РѕС‡РЅРѕ РґРµРєРѕРґРёСЂРѕРІР°РЅРЅС‹Рµ РєР°Рє Latin-1.
     try:
         fixed = value.encode("latin1").decode("utf-8")
-        # РќРµ РїСЂРёРЅРёРјР°РµРј СЂРµР·СѓР»СЊС‚Р°С‚, РµСЃР»Рё РѕРЅ СЃС‚Р°Р» СЏРІРЅРѕ С…СѓР¶Рµ.
-        bad_before = value.count("Гђ") + value.count("Г‘") + value.count("Гѓ") + value.count("Г‚")
-        bad_after = fixed.count("Гђ") + fixed.count("Г‘") + fixed.count("Гѓ") + fixed.count("Г‚")
-        if bad_after < bad_before:
+        if bad_score(fixed) < before:
+            return fixed
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+
+    # Р’Р°СЂРёР°РЅС‚ 2: UTF-8 bytes, РѕС€РёР±РѕС‡РЅРѕ РґРµРєРѕРґРёСЂРѕРІР°РЅРЅС‹Рµ РєР°Рє Windows-1252.
+    try:
+        fixed = value.encode("cp1252").decode("utf-8")
+        if bad_score(fixed) < before:
+            return fixed
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+
+    # Р’Р°СЂРёР°РЅС‚ 3: UTF-8 -> Windows-1251/Unicode mojibake
+    # Р§Р°СЃС‚С‹Р№ РІРёРґ: "Р СњР С•Р Р†Р С•РЎРѓРЎвЂљР С‘".
+    try:
+        fixed = value.encode("latin1").decode("utf-8")
+        if "Р " in value and ("Р " not in fixed or bad_score(fixed) < before):
             return fixed
     except (UnicodeEncodeError, UnicodeDecodeError):
         pass
@@ -288,9 +308,14 @@ def escape_html(text):
 
 def is_russian(text):
     """
-    РџСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ Р·Р°РіРѕР»РѕРІРѕРє РґРµР№СЃС‚РІРёС‚РµР»СЊРЅРѕ СЂСѓСЃСЃРєРёР№.
-    """
+    РќР°РґС‘Р¶РЅР°СЏ РїСЂРѕРІРµСЂРєР° СЂСѓСЃСЃРєРѕРіРѕ С‚РµРєСЃС‚Р°.
 
+    Р’Р°Р¶РЅРѕ:
+    - РґРѕРїСѓСЃРєР°РµС‚ Р°РЅРіР»РёР№СЃРєРёРµ Р±СЂРµРЅРґС‹ Рё РЅР°Р·РІР°РЅРёСЏ (Ozon, Nvidia, Yandex Cloud);
+    - РЅРµ С‚СЂРµР±СѓРµС‚, С‡С‚РѕР±С‹ РєРёСЂРёР»Р»РёС†С‹ Р±С‹Р»Рѕ Р±РѕР»СЊС€Рµ Р»Р°С‚РёРЅРёС†С‹;
+    - РѕС‚Р±СЂР°СЃС‹РІР°РµС‚ Р·Р°РіРѕР»РѕРІРєРё Р±РµР· РєРёСЂРёР»Р»РёС†С‹;
+    - РґРѕРїСѓСЃРєР°РµС‚ РєРѕСЂРѕС‚РєРёРµ СЂСѓСЃСЃРєРёРµ Р·Р°РіРѕР»РѕРІРєРё.
+    """
     text = clean_text(text)
 
     if not text:
@@ -298,13 +323,22 @@ def is_russian(text):
 
     cyrillic = len(re.findall(r"[Р°-СЏС‘]", text.lower()))
     latin = len(re.findall(r"[a-z]", text.lower()))
+    letters = cyrillic + latin
 
     if cyrillic == 0:
         return False
 
-    # Russian text may contain English brand names, abbreviations and names.
-    # Require a meaningful Cyrillic presence rather than Cyrillic >= Latin.
-    return cyrillic >= 3
+    # Р•СЃР»Рё РІ С‚РµРєСЃС‚Рµ РµСЃС‚СЊ С…РѕС‚СЏ Р±С‹ 3 СЂСѓСЃСЃРєРёРµ Р±СѓРєРІС‹,
+    # СЃС‡РёС‚Р°РµРј РµРіРѕ СЂСѓСЃСЃРєРёРј. РђРЅРіР»РёР№СЃРєРёРµ Р±СЂРµРЅРґС‹ РЅРµ РјРµС€Р°СЋС‚.
+    if cyrillic >= 3:
+        return True
+
+    # Р”Р»СЏ РѕС‡РµРЅСЊ РєРѕСЂРѕС‚РєРёС… Р·Р°РіРѕР»РѕРІРєРѕРІ СЂР°Р·СЂРµС€Р°РµРј 1вЂ“2 СЂСѓСЃСЃРєРёРµ Р±СѓРєРІС‹,
+    # С‚РѕР»СЊРєРѕ РµСЃР»Рё Р»Р°С‚РёРЅРёС†С‹ РїСЂР°РєС‚РёС‡РµСЃРєРё РЅРµС‚.
+    if cyrillic >= 1 and latin == 0 and letters <= 8:
+        return True
+
+    return False
 
 
 def contains_any(text, words):
@@ -1298,7 +1332,7 @@ def main():
     )
 
     print(
-        "РњР Рљ [Р‘РР—РќР•РЎ РќРћР’РћРЎРўР] вЂ” VERSION 6.3"
+        "РњР Рљ [Р‘РР—РќР•РЎ РќРћР’РћРЎРўР] вЂ” VERSION 6.4"
     )
 
     print(
