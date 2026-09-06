@@ -9,7 +9,7 @@ from urllib.parse import urljoin
 
 import requests
 
-VERSION = "7.1"
+VERSION = "7.2"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL = os.getenv("CHANNEL", "@etomrk")
 MAX_POSTS_PER_RUN = 2
@@ -76,7 +76,7 @@ def clean_text(value):
 
 def normalize(value):
     value = clean_text(value).lower()
-    value = value.replace("С‘", "Рµ")
+    value = value.replace("\u0451", "\u0435")
     return re.sub(r"[^\w\s-]", " ", value, flags=re.UNICODE)
 
 
@@ -319,8 +319,8 @@ def build_post(article):
     link = clean_text(article["link"])
     return (
         f"<b>{html.escape(title)}</b>\n\n"
-        f"Source: {html.escape(source)}\n"
-        f"{html.escape(link)}"
+        f"\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a: {html.escape(source)}\n"
+        f"\ud83d\udd17 <a href=\"{html.escape(link)}\">\u0427\u0438\u0442\u0430\u0442\u044c \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a</a>"
     )
 
 
