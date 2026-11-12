@@ -1,11 +1,11 @@
 {
-  "last_run_utc": "2026-11-12T09:10:03.198174+00:00",
+  "last_run_utc": "2026-11-12T17:40:38.001243+00:00",
   "last_published": 1,
-  "total_seen_keys": 1696,
-  "daily_count_after_run": 2,
+  "total_seen_keys": 1697,
+  "daily_count_after_run": 3,
   "feeds_with_results": 6,
   "feeds_total": 6,
-  "items_collected": 227,
-  "candidates": 92,
+  "items_collected": 231,
+  "candidates": 116,
   "version": "11.0"
 }
